@@ -307,8 +307,13 @@ static void draw_board_frame(Game *g)
 static void draw_hud(Game *g)
 {
     int top = g->top, left = g->left;
+    const char *title = "ASCIISWEEPER";
+    int board_width = g->w * 2;
+    int title_col = left + (board_width - (int)strlen(title)) / 2;
+    if (title_col < left) title_col = left;
+
     attron(COLOR_PAIR(CP_TITLE) | A_BOLD);
-    mvprintw(top - 4, left, "ASCIISWEEPER");
+    mvprintw(top - 4, title_col, "%s", title);
     attroff(COLOR_PAIR(CP_TITLE) | A_BOLD);
 
     int elapsed = g->first_move ? 0 : g->elapsed;
