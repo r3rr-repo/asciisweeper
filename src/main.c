@@ -100,7 +100,7 @@ static void game_init(Game *g, int w, int h, int mines)
 
     int scr_h, scr_w;
     getmaxyx(stdscr, scr_h, scr_w);
-    int block_h = h + 7;   /* title, blank, hud, border*2, board rows, blank, footer */
+    int block_h = h + 8;   /* title, blank, hud, border*2, board rows, blank, footer*2 */
     int block_w = w * 2 + 2;
     int origin_y = (scr_h - block_h) / 2;
     int origin_x = (scr_w - block_w) / 2;
@@ -323,9 +323,20 @@ static void draw_hud(Game *g)
 
 static void draw_footer(Game *g)
 {
+    const char *line1 = "Move: arrows/hjkl  |  Reveal: space/enter  |  Flag: f";
+    const char *line2 = "Chord: c  |  Restart: r  |  Menu: n  |  Quit: q";
+    int scr_h, scr_w;
+    getmaxyx(stdscr, scr_h, scr_w);
+    (void)scr_h;
+
+    int col1 = (scr_w - (int)strlen(line1)) / 2;
+    int col2 = (scr_w - (int)strlen(line2)) / 2;
+    if (col1 < 0) col1 = 0;
+    if (col2 < 0) col2 = 0;
+
     attron(COLOR_PAIR(CP_HUD));
-    mvprintw(g->top + g->h + 2, g->left,
-        "Move: arrows/hjkl  Reveal: space/enter  Flag: f  Chord: c  Restart: r  Menu: n  Quit: q");
+    mvprintw(g->top + g->h + 2, col1, "%s", line1);
+    mvprintw(g->top + g->h + 3, col2, "%s", line2);
     attroff(COLOR_PAIR(CP_HUD));
 }
 
@@ -405,11 +416,11 @@ static AfterGame play_game(int w, int h, int mines)
 
         if (g.status != STATE_PLAYING) {
             attron(COLOR_PAIR(g.status == STATE_WON ? CP_WIN : CP_LOSE) | A_BOLD);
-            mvprintw(g.top + g.h + 4, g.left,
+            mvprintw(g.top + g.h + 5, g.left,
                      g.status == STATE_WON ? "YOU WIN! Time: %ds" : "BOOM! Game Over.", g.elapsed);
             attroff(COLOR_PAIR(g.status == STATE_WON ? CP_WIN : CP_LOSE) | A_BOLD);
             attron(COLOR_PAIR(CP_HUD));
-            mvprintw(g.top + g.h + 5, g.left, "[R]estart  [N]ew game  [Q]uit");
+            mvprintw(g.top + g.h + 6, g.left, "[R]estart  [N]ew game  [Q]uit");
             attroff(COLOR_PAIR(CP_HUD));
             refresh();
         }
@@ -616,7 +627,7 @@ int main(void)
 
         /* Make sure the board fits the terminal; clamp if needed. */
         int max_board_w = (COLS - 4) / 2;
-        int max_board_h = LINES - 9;
+        int max_board_h = LINES - 10;
         if (d.w > max_board_w) d.w = max_board_w;
         if (d.h > max_board_h) d.h = max_board_h;
         if (d.w < 4) d.w = 4;
