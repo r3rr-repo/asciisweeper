@@ -310,7 +310,7 @@ static void draw_hud(Game *g)
     const char *title = "ASCIISWEEPER";
     int board_width = g->w * 2;
     int title_col = left + (board_width - (int)strlen(title)) / 2;
-    if (title_col < left) title_col = left;
+    if (title_col < 0) title_col = 0;
 
     attron(COLOR_PAIR(CP_TITLE) | A_BOLD);
     mvprintw(top - 4, title_col, "%s", title);
@@ -324,7 +324,7 @@ static void draw_hud(Game *g)
     snprintf(status_line, sizeof(status_line), "Mines: %03d    Time: %03d",
              mines_left < 0 ? 0 : mines_left, elapsed);
     int status_col = left + (board_width - (int)strlen(status_line)) / 2;
-    if (status_col < left) status_col = left;
+    if (status_col < 0) status_col = 0;
 
     attron(COLOR_PAIR(CP_HUD));
     mvprintw(top - 2, status_col, "%s", status_line);
