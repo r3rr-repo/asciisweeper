@@ -315,9 +315,22 @@ static void draw_hud(Game *g)
     if (elapsed > 999) elapsed = 999;
     int mines_left = g->mines - g->flags_placed;
 
+    char mines_buf[16], time_buf[16];
+    snprintf(mines_buf, sizeof(mines_buf), "Mines: %03d", mines_left < 0 ? 0 : mines_left);
+    snprintf(time_buf, sizeof(time_buf), "Time: %03d", elapsed);
+    int mines_len = (int)strlen(mines_buf);
+    int time_len = (int)strlen(time_buf);
+
+    /* Right-align the timer to the board's right edge, but never let it
+     * collide with the mines counter on narrow boards. */
+    int time_col = left + g->w * 2 - time_len;
+    int min_gap = 2;
+    if (time_col < left + mines_len + min_gap)
+        time_col = left + mines_len + min_gap;
+
     attron(COLOR_PAIR(CP_HUD));
-    mvprintw(top - 2, left, "Mines: %03d", mines_left < 0 ? 0 : mines_left);
-    mvprintw(top - 2, left + g->w * 2 - 10, "Time: %03d", elapsed);
+    mvprintw(top - 2, left, "%s", mines_buf);
+    mvprintw(top - 2, time_col, "%s", time_buf);
     attroff(COLOR_PAIR(CP_HUD));
 }
 
