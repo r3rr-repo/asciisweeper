@@ -52,7 +52,7 @@ static void setup_colors(void)
     init_pair(CP_MINE, COLOR_WHITE, -1);
     init_pair(CP_MINE_HIT, COLOR_WHITE, COLOR_RED);
     init_pair(CP_WRONG_FLAG, COLOR_RED, -1);
-    init_pair(CP_EMPTY, -1, -1);
+    init_pair(CP_EMPTY, -1, COLOR_BLUE);
     init_pair(CP_HUD, COLOR_WHITE, -1);
     init_pair(CP_TITLE, COLOR_GREEN, -1);
     init_pair(CP_CURSOR, COLOR_BLACK, COLOR_WHITE);
