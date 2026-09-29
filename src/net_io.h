@@ -49,6 +49,9 @@ bool   unpack_action_flag(const uint8_t *buf, size_t len, MsgActionFlag *out);
 size_t pack_action_chord(uint8_t *buf, const MsgActionChord *m);
 bool   unpack_action_chord(const uint8_t *buf, size_t len, MsgActionChord *out);
 
+size_t pack_chat(uint8_t *buf, const MsgChat *m);
+bool   unpack_chat(const uint8_t *buf, size_t len, MsgChat *out);
+
 size_t pack_welcome(uint8_t *buf, const MsgWelcome *m);
 bool   unpack_welcome(const uint8_t *buf, size_t len, MsgWelcome *out);
 
@@ -75,6 +78,9 @@ bool   unpack_match_end(const uint8_t *buf, size_t len, MsgMatchEnd *out);
 
 size_t pack_error(uint8_t *buf, const MsgError *m);
 bool   unpack_error(const uint8_t *buf, size_t len, MsgError *out);
+
+size_t pack_chat_recv(uint8_t *buf, const MsgChatRecv *m);
+bool   unpack_chat_recv(const uint8_t *buf, size_t len, MsgChatRecv *out);
 
 /* Board <-> wire snapshot conversion (server builds outgoing, client
  * applies incoming). Unclicked mines are never encoded as mines. */

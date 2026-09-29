@@ -378,6 +378,8 @@ typedef struct {
     char name[NET_MAX_NAME_LEN + 1];
 } MPConnectInfo;
 
+#define CHAT_LOG_LINES 3
+
 /* Multiplayer session state. Reuses Game for the board/cursor/screen-origin
  * fields shared with single-player rendering; the multiplayer client never
  * mutates g.board itself - it only ever applies server-pushed snapshots. */
@@ -394,7 +396,22 @@ typedef struct {
     int mines_left;
     uint8_t session_token[NET_TOKEN_LEN];
     char status_line[96];
+
+    bool chat_mode; /* true while composing an outgoing line */
+    char chat_input[NET_CHAT_MSG_LEN + 1];
+    int chat_input_len;
+    char chat_log[CHAT_LOG_LINES][NET_MAX_NAME_LEN + NET_CHAT_MSG_LEN + 4]; /* ring buffer */
+    int chat_log_next;
+    int chat_log_count;
 } MPState;
+
+static void chat_log_push(MPState *mp, const char *from, const char *text)
+{
+    snprintf(mp->chat_log[mp->chat_log_next], sizeof(mp->chat_log[0]), "%s: %s", from, text);
+    mp->chat_log_next = (mp->chat_log_next + 1) % CHAT_LOG_LINES;
+    if (mp->chat_log_count < CHAT_LOG_LINES)
+        mp->chat_log_count++;
+}
 
 static void draw_mp_hud(MPState *mp)
 {
@@ -431,7 +448,7 @@ static void draw_mp_hud(MPState *mp)
 static void draw_mp_footer(MPState *mp)
 {
     const char *line1 = "Move: arrows/hjkl  |  Reveal: space/enter  |  Flag: f";
-    const char *line2 = "Chord: c  |  Menu: n  |  Quit: q";
+    const char *line2 = "Chord: c  |  Chat: t  |  Menu: n  |  Quit: q";
     int scr_h, scr_w;
     getmaxyx(stdscr, scr_h, scr_w);
     (void)scr_h;
@@ -471,6 +488,33 @@ static void draw_avatar_panels(MPState *mp)
     attroff(COLOR_PAIR(CP_HUD));
 }
 
+static void draw_chat(MPState *mp)
+{
+    int scr_h, scr_w;
+    getmaxyx(stdscr, scr_h, scr_w);
+    (void)scr_w;
+
+    int row = mp->g.top + mp->g.board.h + 6;
+    int start = (mp->chat_log_next - mp->chat_log_count + CHAT_LOG_LINES) % CHAT_LOG_LINES;
+
+    attron(COLOR_PAIR(CP_HUD));
+    for (int i = 0; i < mp->chat_log_count; i++) {
+        int idx = (start + i) % CHAT_LOG_LINES;
+        if (row + i < scr_h)
+            mvprintw(row + i, mp->g.left, "%s", mp->chat_log[idx]);
+    }
+    attroff(COLOR_PAIR(CP_HUD));
+
+    if (mp->chat_mode) {
+        int input_row = row + mp->chat_log_count;
+        if (input_row < scr_h) {
+            attron(COLOR_PAIR(CP_HUD) | A_BOLD);
+            mvprintw(input_row, mp->g.left, "Chat> %s_", mp->chat_input);
+            attroff(COLOR_PAIR(CP_HUD) | A_BOLD);
+        }
+    }
+}
+
 static void render_multiplayer(MPState *mp)
 {
     erase();
@@ -484,6 +528,7 @@ static void render_multiplayer(MPState *mp)
         mvprintw(mp->g.top + mp->g.board.h + 5, mp->g.left, "%s", mp->status_line);
         attroff(COLOR_PAIR(CP_HUD) | A_BOLD);
     }
+    draw_chat(mp);
     refresh();
 }
 
@@ -678,6 +723,12 @@ static AfterGame play_multiplayer(const char *host, int port, const char *name, 
                     }
                     break;
                 }
+                case MSG_CHAT_RECV: {
+                    MsgChatRecv cr;
+                    if (unpack_chat_recv(frame.payload, frame.len, &cr))
+                        chat_log_push(&mp, mp.opponent_name, cr.text);
+                    break;
+                }
                 case MSG_ERROR: {
                     MsgError em;
                     if (unpack_error(frame.payload, frame.len, &em))
@@ -691,12 +742,45 @@ static AfterGame play_multiplayer(const char *host, int port, const char *name, 
 
         if (r > 0 && FD_ISSET(term_fd, &rfds)) {
             int ch = getch();
+
+            if (mp.chat_mode) {
+                /* While composing, every key is text (or a control key for
+                 * this input line) - none of it should fall through to the
+                 * quit/menu/game bindings below. */
+                if (ch == 27) {
+                    mp.chat_mode = false;
+                } else if (ch == '\n' || ch == KEY_ENTER) {
+                    if (mp.chat_input_len > 0) {
+                        MsgChat cm;
+                        strncpy(cm.text, mp.chat_input, NET_CHAT_MSG_LEN);
+                        cm.text[NET_CHAT_MSG_LEN] = '\0';
+                        uint8_t cbuf[NET_MAX_PAYLOAD];
+                        size_t cn = pack_chat(cbuf, &cm);
+                        net_send_frame(mp.nc->ssl, MSG_CHAT, cbuf, cn);
+                        chat_log_push(&mp, mp.my_name, mp.chat_input);
+                    }
+                    mp.chat_mode = false;
+                } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
+                    if (mp.chat_input_len > 0)
+                        mp.chat_input[--mp.chat_input_len] = '\0';
+                } else if (ch >= 32 && ch < 127 && mp.chat_input_len < NET_CHAT_MSG_LEN) {
+                    mp.chat_input[mp.chat_input_len++] = (char)ch;
+                    mp.chat_input[mp.chat_input_len] = '\0';
+                }
+                continue;
+            }
+
             if (ch == 'q' || ch == 'Q') { net_close(mp.nc); return AFTER_QUIT; }
             if (ch == 'n' || ch == 'N') { net_close(mp.nc); return AFTER_MENU; }
             if (!matched)
                 continue; /* ignore game keys while still queued */
 
             switch (ch) {
+                case 't': case 'T':
+                    mp.chat_mode = true;
+                    mp.chat_input[0] = '\0';
+                    mp.chat_input_len = 0;
+                    break;
                 case KEY_UP: case 'k':
                     if (mp.g.cursor_y > 0) mp.g.cursor_y--;
                     break;
