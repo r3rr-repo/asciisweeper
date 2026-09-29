@@ -596,6 +596,8 @@ static AfterGame play_multiplayer(const char *host, int port, const char *name, 
     strncpy(cfg->last_host, host, CONFIG_HOST_LEN - 1);
     cfg->last_host[CONFIG_HOST_LEN - 1] = '\0';
     cfg->last_port = port;
+    strncpy(cfg->last_name, name, NET_MAX_NAME_LEN);
+    cfg->last_name[NET_MAX_NAME_LEN] = '\0';
     config_save(cfg);
 
     MsgHello hello = { .protocol_version = NET_PROTO_VERSION,
@@ -942,7 +944,7 @@ static MenuChoice menu(Difficulty *custom_out, MPConnectInfo *mp_out, Config *cf
                     prompt_str("Server host", prow, left, cfg->last_host, mp_out->host, sizeof(mp_out->host));
                     prompt_int("Port", prow + 1, left, 1, 65535, cfg->last_port, &port);
                     mp_out->port = port;
-                    prompt_str("Your name", prow + 2, left, "Player", mp_out->name, sizeof(mp_out->name));
+                    prompt_str("Your name", prow + 2, left, cfg->last_name, mp_out->name, sizeof(mp_out->name));
                     return MENU_MULTIPLAYER;
                 }
                 return choice;
