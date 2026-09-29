@@ -52,7 +52,7 @@ static void setup_colors(void)
     init_pair(CP_MINE, COLOR_WHITE, -1);
     init_pair(CP_MINE_HIT, COLOR_WHITE, COLOR_RED);
     init_pair(CP_WRONG_FLAG, COLOR_RED, -1);
-    init_pair(CP_EMPTY, -1, -1);
+    init_pair(CP_EMPTY, -1, COLOR_BLUE);
     init_pair(CP_HUD, COLOR_WHITE, -1);
     init_pair(CP_TITLE, COLOR_GREEN, -1);
     init_pair(CP_CURSOR, COLOR_BLACK, COLOR_WHITE);
@@ -218,6 +218,8 @@ static void render(Game *g)
     refresh();
 }
 
+#define AUTO_RESTART_SECONDS 2
+
 /* Returns what to do after the game ends: restart / back to menu / quit. */
 static AfterGame play_game(int w, int h, int mines)
 {
@@ -226,6 +228,8 @@ static AfterGame play_game(int w, int h, int mines)
     wtimeout(stdscr, 200);
     clear(); /* force a full physical redraw when coming from a differently-shaped screen */
 
+    time_t game_over_at = 0;
+
     while (1) {
         if (!g.board.first_move && g.board.status == STATE_PLAYING)
             g.elapsed = (int)(time(NULL) - g.start_time);
@@ -233,14 +237,23 @@ static AfterGame play_game(int w, int h, int mines)
         render(&g);
 
         if (g.board.status != STATE_PLAYING) {
+            if (game_over_at == 0)
+                game_over_at = time(NULL);
+            int remaining = AUTO_RESTART_SECONDS - (int)(time(NULL) - game_over_at);
+            if (remaining < 0) remaining = 0;
+
             attron(COLOR_PAIR(g.board.status == STATE_WON ? CP_WIN : CP_LOSE) | A_BOLD);
             mvprintw(g.top + g.board.h + 5, g.left,
                      g.board.status == STATE_WON ? "YOU WIN! Time: %ds" : "BOOM! Game Over.", g.elapsed);
             attroff(COLOR_PAIR(g.board.status == STATE_WON ? CP_WIN : CP_LOSE) | A_BOLD);
             attron(COLOR_PAIR(CP_HUD));
-            mvprintw(g.top + g.board.h + 6, g.left, "[R]estart  [N]ew game  [Q]uit");
+            mvprintw(g.top + g.board.h + 6, g.left,
+                     "[R]estart  [N]ew game  [Q]uit  -  new game in %ds", remaining);
             attroff(COLOR_PAIR(CP_HUD));
             refresh();
+
+            if (remaining == 0)
+                return AFTER_RESTART;
         }
 
         int ch = getch();

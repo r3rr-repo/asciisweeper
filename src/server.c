@@ -12,6 +12,7 @@
 #include <pthread.h>
 #include <ctype.h>
 #include <signal.h>
+#include <stdarg.h>
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -46,6 +47,38 @@
 static volatile sig_atomic_t g_shutdown = 0;
 static int g_active_connections = 0;
 static pthread_mutex_t g_active_connections_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* ---------------- logging ---------------- */
+
+/* Server activity log: connections, queue joins, match lifecycle, and
+ * rejections - not individual in-match actions (too noisy for a server
+ * log; the match's own state is authoritative and doesn't need an audit
+ * trail of every reveal/flag/chord). Timestamped, one line per event,
+ * flushed immediately so `tail -f` sees it live. Safe to call from any
+ * thread: fprintf(stderr, ...) is line-atomic enough for our purposes and
+ * we don't require strict interleaving ordering beyond readability. */
+static void log_line(const char *fmt, ...)
+{
+    time_t now = time(NULL);
+    struct tm tmv;
+    localtime_r(&now, &tmv);
+    char ts[32];
+    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", &tmv);
+
+    fprintf(stderr, "[%s] ", ts);
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fprintf(stderr, "\n");
+    fflush(stderr);
+}
+
+static void ip_to_str(struct in_addr ip, char *buf, size_t len)
+{
+    if (!inet_ntop(AF_INET, &ip, buf, (socklen_t)len))
+        strncpy(buf, "?.?.?.?", len - 1);
+}
 
 /* ---------------- connection ---------------- */
 
@@ -212,6 +245,9 @@ static int queue_join_and_maybe_pair(Connection *conn)
         RAND_bytes(m->token[1], NET_TOKEN_LEN);
         token_register(m->token[0], m, 0);
         token_register(m->token[1], m, 1);
+
+        log_line("Match started: %s vs %s (%dx%d, %d mines)",
+                  a->name, b->name, m->board.w, m->board.h, m->board.mines);
 
         pthread_mutex_lock(&a->state_lock);
         a->assigned_match = m;
@@ -469,6 +505,12 @@ static void apply_action_and_broadcast(Match *m, int player_index, uint8_t type,
         m->active = false;
 
     Connection *rejecting_conn = rejected ? m->conns[player_index] : NULL;
+    char name0[NET_MAX_NAME_LEN + 1], name1[NET_MAX_NAME_LEN + 1];
+    int final_scores[2] = { m->scores[0], m->scores[1] };
+    if (match_ended) {
+        strncpy(name0, m->names[0], NET_MAX_NAME_LEN); name0[NET_MAX_NAME_LEN] = '\0';
+        strncpy(name1, m->names[1], NET_MAX_NAME_LEN); name1[NET_MAX_NAME_LEN] = '\0';
+    }
     pthread_mutex_unlock(&m->lock);
 
     if (rejecting_conn) {
@@ -477,8 +519,12 @@ static void apply_action_and_broadcast(Match *m, int player_index, uint8_t type,
     }
 
     broadcast_board_state(m);
-    if (match_ended)
+    if (match_ended) {
+        log_line("Match ended (%s vs %s): %s, scores %s=%d %s=%d",
+                  name0, name1, end_reason == END_BOMB ? "bomb hit" : "board cleared",
+                  name0, final_scores[0], name1, final_scores[1]);
         send_match_end(m, end_reason);
+    }
 }
 
 /* Waits up to RECONNECT_GRACE_SECONDS for the given player slot to
@@ -525,6 +571,9 @@ static void play_match(Connection *conn, Match *m, int player_index)
             Connection *opponent = m->connected[1 - player_index] ? m->conns[1 - player_index] : NULL;
             pthread_mutex_unlock(&m->lock);
 
+            log_line("%s disconnected mid-match; waiting up to %ds for reconnect",
+                      conn->name, RECONNECT_GRACE_SECONDS);
+
             if (opponent) {
                 MsgOpponentStatus st = { .state = OPP_DISCONNECTED, .grace_seconds = RECONNECT_GRACE_SECONDS };
                 uint8_t buf[8];
@@ -541,8 +590,10 @@ static void play_match(Connection *conn, Match *m, int player_index)
             if (still_active2)
                 m->active = false; /* grace period expired with no score change, per the confirmed rule */
             pthread_mutex_unlock(&m->lock);
-            if (still_active2)
+            if (still_active2) {
+                log_line("%s failed to reconnect in time; match ended (no score change)", conn->name);
                 send_match_end(m, END_OPPONENT_LEFT);
+            }
             return;
         }
 
@@ -564,13 +615,19 @@ static void play_match(Connection *conn, Match *m, int player_index)
 
 static void handle_connection(Connection *conn)
 {
+    char conn_ip[INET_ADDRSTRLEN];
+    ip_to_str(conn->ip, conn_ip, sizeof(conn_ip));
+
     time_t hello_deadline = time(NULL) + HELLO_TIMEOUT_SECONDS;
     NetFrame frame;
 
     while (1) {
         NetResult r = net_recv_frame_ex(conn->ssl, &frame);
         if (r == NET_TIMEOUT) {
-            if (time(NULL) > hello_deadline) return;
+            if (time(NULL) > hello_deadline) {
+                log_line("%s: no HELLO/RECONNECT received within %ds, closing", conn_ip, HELLO_TIMEOUT_SECONDS);
+                return;
+            }
             continue;
         }
         if (r != NET_OK) return;
@@ -582,6 +639,7 @@ static void handle_connection(Connection *conn)
         if (!unpack_reconnect(frame.payload, frame.len, &rc)) return;
         Match *m; int player_index;
         if (!token_lookup(rc.token, &m, &player_index)) {
+            log_line("Reconnect attempt from %s failed: unknown or expired token", conn_ip);
             send_error(conn, ERR_RECONNECT_FAILED, "unknown or expired session");
             return;
         }
@@ -595,15 +653,21 @@ static void handle_connection(Connection *conn)
         char opp_name[NET_MAX_NAME_LEN + 1];
         strncpy(opp_name, m->names[1 - player_index], NET_MAX_NAME_LEN);
         opp_name[NET_MAX_NAME_LEN] = '\0';
+        char my_name[NET_MAX_NAME_LEN + 1];
+        strncpy(my_name, m->names[player_index], NET_MAX_NAME_LEN);
+        my_name[NET_MAX_NAME_LEN] = '\0';
         uint8_t w = (uint8_t)m->board.w, h = (uint8_t)m->board.h;
         uint16_t mines = (uint16_t)m->board.mines;
         Connection *opponent = active && m->connected[1 - player_index] ? m->conns[1 - player_index] : NULL;
         pthread_mutex_unlock(&m->lock);
 
         if (!active) {
+            log_line("%s (%s) reconnect attempt failed: match already ended", my_name, conn_ip);
             send_error(conn, ERR_RECONNECT_FAILED, "match already ended");
             return;
         }
+
+        log_line("%s (%s) reconnected to match vs %s", my_name, conn_ip, opp_name);
 
         MsgReconnectOk ok = { .your_player_id = (uint8_t)player_index, .w = w, .h = h,
                                .mines = mines };
@@ -636,6 +700,7 @@ static void handle_connection(Connection *conn)
         return;
     }
     if (hello.protocol_version != NET_PROTO_VERSION) {
+        log_line("%s: rejected HELLO with unsupported protocol version %u", conn_ip, hello.protocol_version);
         send_error(conn, ERR_BAD_VERSION, "unsupported protocol version");
         return;
     }
@@ -643,9 +708,12 @@ static void handle_connection(Connection *conn)
     strncpy(conn->name, hello.name, NET_MAX_NAME_LEN);
 
     if (!rate_allow_join(conn->ip)) {
+        log_line("%s (%s) rejected: too many queued/active connections from this IP", conn->name, conn_ip);
         send_error(conn, ERR_RATE_LIMITED, "too many queue joins, slow down");
         return;
     }
+
+    log_line("%s (%s) connected", conn->name, conn_ip);
 
     MsgWelcome welcome = { .protocol_version = NET_PROTO_VERSION, .player_id = 0 };
     uint8_t wbuf[8];
@@ -655,6 +723,7 @@ static void handle_connection(Connection *conn)
     int position = queue_join_and_maybe_pair(conn);
 
     if (position > 0) {
+        log_line("%s joined the queue (position %d)", conn->name, position);
         /* Still waiting: poll for pairing, periodically reporting queue
          * position, and bail out if the client disconnects while queued. */
         while (1) {
@@ -683,6 +752,7 @@ static void handle_connection(Connection *conn)
             NetFrame f;
             NetResult r = net_recv_frame_ex(conn->ssl, &f);
             if (r != NET_TIMEOUT && r != NET_OK) {
+                log_line("%s left the queue (disconnected before a match was found)", conn->name);
                 queue_remove(conn);
                 rate_release(conn->ip);
                 return;
@@ -738,6 +808,9 @@ static void *client_thread(void *arg)
         bool retryable = (e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE) ||
                           (e == SSL_ERROR_SYSCALL && (errno == EAGAIN || errno == EWOULDBLOCK));
         if (!retryable || time(NULL) > deadline) {
+            char ipstr[INET_ADDRSTRLEN];
+            ip_to_str(ta->ip, ipstr, sizeof(ipstr));
+            log_line("TLS handshake failed/timed out for %s", ipstr);
             SSL_free(ssl);
             close(ta->client_fd);
             pthread_mutex_lock(&g_active_connections_lock);
@@ -834,7 +907,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    fprintf(stderr, "asciisweeper-server listening on port %d\n", port);
+    log_line("asciisweeper-server listening on port %d", port);
 
     while (!g_shutdown) {
         struct sockaddr_in client_addr;
@@ -852,6 +925,9 @@ int main(int argc, char **argv)
         pthread_mutex_unlock(&g_active_connections_lock);
 
         if (over_capacity) {
+            char ipstr[INET_ADDRSTRLEN];
+            ip_to_str(client_addr.sin_addr, ipstr, sizeof(ipstr));
+            log_line("Rejected connection from %s: server at capacity (%d connections)", ipstr, MAX_CONNECTIONS);
             close(client_fd);
             continue;
         }
