@@ -1,6 +1,7 @@
 #include "net_io.h"
 #include <string.h>
 #include <errno.h>
+#include <poll.h>
 
 /* ---- raw framed send/recv ---- */
 
@@ -60,6 +61,22 @@ bool net_recv_frame(SSL *ssl, NetFrame *out)
 
 NetResult net_recv_frame_ex(SSL *ssl, NetFrame *out)
 {
+    /* Rely on poll() on the raw fd for the timeout, not SO_RCVTIMEO deep
+     * inside OpenSSL's internal record-buffering reads. Check SSL_pending()
+     * first since poll() can't see already-decrypted plaintext OpenSSL is
+     * holding internally. */
+    if (SSL_pending(ssl) <= 0) {
+        int fd = SSL_get_fd(ssl);
+        struct pollfd pfd = { .fd = fd, .events = POLLIN };
+        int sr = poll(&pfd, 1, 1000);
+        if (sr == 0)
+            return NET_TIMEOUT;
+        if (sr < 0)
+            return (errno == EINTR) ? NET_TIMEOUT : NET_ERROR;
+        if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))
+            return NET_ERROR;
+    }
+
     uint8_t header[3];
     int n = SSL_read(ssl, header, 1);
     if (n == 0)

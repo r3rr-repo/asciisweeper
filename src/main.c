@@ -8,8 +8,13 @@
 #include <string.h>
 #include <time.h>
 #include <stdbool.h>
+#include <unistd.h>
+#include <sys/select.h>
 
 #include "board.h"
+#include "net_proto.h"
+#include "net_io.h"
+#include "client_net.h"
 
 typedef struct {
     Board board;
@@ -19,7 +24,7 @@ typedef struct {
     int top, left; /* screen origin of the board, for centering */
 } Game;
 
-typedef enum { MENU_BEGINNER, MENU_INTERMEDIATE, MENU_EXPERT, MENU_CUSTOM, MENU_QUIT } MenuChoice;
+typedef enum { MENU_BEGINNER, MENU_INTERMEDIATE, MENU_EXPERT, MENU_MULTIPLAYER, MENU_CUSTOM, MENU_QUIT } MenuChoice;
 
 typedef enum { AFTER_RESTART, AFTER_MENU, AFTER_QUIT } AfterGame;
 
@@ -322,7 +327,352 @@ static void prompt_int(const char *label, int row, int col, int minv, int maxv, 
     *out = v;
 }
 
-static MenuChoice menu(Difficulty *custom_out)
+static void prompt_str(const char *label, int row, int col, const char *def, char *out, size_t outsz)
+{
+    char buf[128];
+    echo();
+    curs_set(1);
+    attron(COLOR_PAIR(CP_HUD));
+    if (def[0])
+        mvprintw(row, col, "%s [default: %s]: ", label, def);
+    else
+        mvprintw(row, col, "%s: ", label);
+    attroff(COLOR_PAIR(CP_HUD));
+    clrtoeol();
+    refresh();
+    getnstr(buf, sizeof(buf) - 1);
+    noecho();
+    curs_set(0);
+
+    const char *src = buf[0] ? buf : def;
+    strncpy(out, src, outsz - 1);
+    out[outsz - 1] = '\0';
+}
+
+typedef struct {
+    char host[128];
+    int port;
+    char name[NET_MAX_NAME_LEN + 1];
+    char ca_file[256];
+    bool have_ca_file;
+} MPConnectInfo;
+
+/* Multiplayer session state. Reuses Game for the board/cursor/screen-origin
+ * fields shared with single-player rendering; the multiplayer client never
+ * mutates g.board itself - it only ever applies server-pushed snapshots. */
+typedef struct {
+    Game g;
+    NetConn *nc;
+    char my_name[NET_MAX_NAME_LEN + 1];
+    char opponent_name[NET_MAX_NAME_LEN + 1];
+    int my_player_id;
+    int player_to_move;
+    int scores[2];
+    int mines_left;
+    uint8_t session_token[NET_TOKEN_LEN];
+    char status_line[96];
+} MPState;
+
+static void draw_mp_hud(MPState *mp)
+{
+    int top = mp->g.top, left = mp->g.left;
+    int board_width = mp->g.board.w * 2;
+
+    const char *title = "ASCIISWEEPER - MULTIPLAYER";
+    int title_col = left + (board_width - (int)strlen(title)) / 2;
+    if (title_col < 0) title_col = 0;
+    attron(COLOR_PAIR(CP_TITLE) | A_BOLD);
+    mvprintw(top - 4, title_col, "%s", title);
+    attroff(COLOR_PAIR(CP_TITLE) | A_BOLD);
+
+    bool your_turn = (mp->player_to_move == mp->my_player_id);
+    const char *turn_line = your_turn ? "YOUR TURN" : "Opponent's turn...";
+    int turn_col = left + (board_width - (int)strlen(turn_line)) / 2;
+    if (turn_col < 0) turn_col = 0;
+    attron(COLOR_PAIR(your_turn ? CP_TITLE : CP_HUD) | A_BOLD);
+    mvprintw(top - 3, turn_col, "%s", turn_line);
+    attroff(COLOR_PAIR(your_turn ? CP_TITLE : CP_HUD) | A_BOLD);
+
+    char status_line[96];
+    snprintf(status_line, sizeof(status_line), "You: %s (%d)    Opponent: %s (%d)    Mines: %03d",
+             mp->my_name, mp->scores[mp->my_player_id],
+             mp->opponent_name, mp->scores[1 - mp->my_player_id],
+             mp->mines_left < 0 ? 0 : mp->mines_left);
+    int status_col = left + (board_width - (int)strlen(status_line)) / 2;
+    if (status_col < 0) status_col = 0;
+    attron(COLOR_PAIR(CP_HUD));
+    mvprintw(top - 2, status_col, "%s", status_line);
+    attroff(COLOR_PAIR(CP_HUD));
+}
+
+static void draw_mp_footer(MPState *mp)
+{
+    const char *line1 = "Move: arrows/hjkl  |  Reveal: space/enter  |  Flag: f";
+    const char *line2 = "Chord: c  |  Menu: n  |  Quit: q";
+    int scr_h, scr_w;
+    getmaxyx(stdscr, scr_h, scr_w);
+    (void)scr_h;
+
+    int col1 = (scr_w - (int)strlen(line1)) / 2;
+    int col2 = (scr_w - (int)strlen(line2)) / 2;
+    if (col1 < 0) col1 = 0;
+    if (col2 < 0) col2 = 0;
+
+    attron(COLOR_PAIR(CP_HUD));
+    mvprintw(mp->g.top + mp->g.board.h + 2, col1, "%s", line1);
+    mvprintw(mp->g.top + mp->g.board.h + 3, col2, "%s", line2);
+    attroff(COLOR_PAIR(CP_HUD));
+}
+
+static void render_multiplayer(MPState *mp)
+{
+    erase();
+    draw_mp_hud(mp);
+    draw_board_frame(&mp->g);
+    draw_board(&mp->g);
+    draw_mp_footer(mp);
+    if (mp->status_line[0]) {
+        attron(COLOR_PAIR(CP_HUD) | A_BOLD);
+        mvprintw(mp->g.top + mp->g.board.h + 5, mp->g.left, "%s", mp->status_line);
+        attroff(COLOR_PAIR(CP_HUD) | A_BOLD);
+    }
+    refresh();
+}
+
+/* Shows a message and waits briefly for a keypress or a short timeout. */
+static void mp_show_message(MPState *mp, const char *msg)
+{
+    strncpy(mp->status_line, msg, sizeof(mp->status_line) - 1);
+    render_multiplayer(mp);
+    wtimeout(stdscr, 3000);
+    getch();
+}
+
+static AfterGame mp_show_end_screen(MPState *mp, MatchEndReason reason)
+{
+    wtimeout(stdscr, -1);
+    while (1) {
+        render_multiplayer(mp);
+
+        const char *msg;
+        int color;
+        if (reason == END_CLEAN_CLEAR) {
+            msg = "BOARD CLEARED! Both players scored.";
+            color = CP_WIN;
+        } else if (reason == END_BOMB) {
+            bool you_lost = mp->scores[mp->my_player_id] < 0;
+            msg = you_lost ? "BOOM! You hit a mine." : "Opponent hit a mine - you're safe!";
+            color = you_lost ? CP_LOSE : CP_WIN;
+        } else {
+            msg = "Match ended: opponent left.";
+            color = CP_HUD;
+        }
+
+        attron(COLOR_PAIR(color) | A_BOLD);
+        mvprintw(mp->g.top + mp->g.board.h + 5, mp->g.left, "%s", msg);
+        attroff(COLOR_PAIR(color) | A_BOLD);
+        attron(COLOR_PAIR(CP_HUD));
+        mvprintw(mp->g.top + mp->g.board.h + 6, mp->g.left, "[N]ew match  [Q]uit");
+        attroff(COLOR_PAIR(CP_HUD));
+        refresh();
+
+        int ch = getch();
+        if (ch == 'n' || ch == 'N') { net_close(mp->nc); return AFTER_MENU; }
+        if (ch == 'q' || ch == 'Q') { net_close(mp->nc); return AFTER_QUIT; }
+    }
+}
+
+static AfterGame play_multiplayer(const char *host, int port, const char *ca_file, const char *name)
+{
+    MPState mp;
+    memset(&mp, 0, sizeof(mp));
+    game_init(&mp.g, MP_BOARD_W, MP_BOARD_H, MP_MINES);
+    strncpy(mp.my_name, name, NET_MAX_NAME_LEN);
+    strncpy(mp.status_line, "Connecting...", sizeof(mp.status_line) - 1);
+    clear();
+    wtimeout(stdscr, -1);
+    render_multiplayer(&mp);
+
+    mp.nc = net_connect(host, port, ca_file);
+    if (!mp.nc) {
+        mp_show_message(&mp, "Could not connect, or the server's certificate could not be verified.");
+        return AFTER_MENU;
+    }
+
+    MsgHello hello = { .protocol_version = NET_PROTO_VERSION };
+    strncpy(hello.name, name, NET_MAX_NAME_LEN);
+    uint8_t buf[NET_MAX_PAYLOAD];
+    size_t n = pack_hello(buf, &hello);
+    net_send_frame(mp.nc->ssl, MSG_HELLO, buf, n);
+
+    strncpy(mp.status_line, "Waiting for an opponent...", sizeof(mp.status_line) - 1);
+    bool matched = false;
+
+    while (1) {
+        render_multiplayer(&mp);
+
+        int term_fd = STDIN_FILENO;
+        int sock_fd = net_get_fd(mp.nc);
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(term_fd, &rfds);
+        FD_SET(sock_fd, &rfds);
+        int maxfd = sock_fd > term_fd ? sock_fd : term_fd;
+        struct timeval tv = { 1, 0 };
+        int r = select(maxfd + 1, &rfds, NULL, NULL, &tv);
+        if (r < 0)
+            continue;
+
+        if (r > 0 && FD_ISSET(sock_fd, &rfds)) {
+            NetFrame frame;
+            if (!net_recv_frame(mp.nc->ssl, &frame)) {
+                if (!matched) {
+                    net_close(mp.nc);
+                    mp.nc = NULL;
+                    mp_show_message(&mp, "Lost connection while waiting in the queue.");
+                    return AFTER_MENU;
+                }
+
+                net_close(mp.nc);
+                mp.nc = NULL;
+                bool recovered = false;
+                for (int attempt = 0; attempt < 20 && !recovered; attempt++) {
+                    snprintf(mp.status_line, sizeof(mp.status_line),
+                             "Connection lost. Reconnecting (attempt %d)...", attempt + 1);
+                    render_multiplayer(&mp);
+                    sleep(3);
+
+                    NetConn *nc2 = net_connect(host, port, ca_file);
+                    if (!nc2)
+                        continue;
+                    net_send_frame(nc2->ssl, MSG_RECONNECT, mp.session_token, NET_TOKEN_LEN);
+                    NetFrame rf;
+                    if (net_recv_frame(nc2->ssl, &rf) && rf.type == MSG_RECONNECT_OK) {
+                        MsgReconnectOk ok;
+                        if (unpack_reconnect_ok(rf.payload, rf.len, &ok)) {
+                            mp.nc = nc2;
+                            mp.my_player_id = ok.your_player_id;
+                            mp.status_line[0] = '\0';
+                            recovered = true;
+                            continue;
+                        }
+                    }
+                    net_close(nc2);
+                }
+                if (!recovered) {
+                    mp_show_message(&mp, "Could not reconnect. Returning to menu.");
+                    return AFTER_MENU;
+                }
+                continue;
+            }
+
+            switch (frame.type) {
+                case MSG_MATCH_START: {
+                    MsgMatchStart ms;
+                    if (unpack_match_start(frame.payload, frame.len, &ms)) {
+                        matched = true;
+                        mp.my_player_id = ms.your_player_id;
+                        mp.player_to_move = ms.first_to_move ? ms.your_player_id : (1 - ms.your_player_id);
+                        strncpy(mp.opponent_name, ms.opponent_name, NET_MAX_NAME_LEN);
+                        memcpy(mp.session_token, ms.session_token, NET_TOKEN_LEN);
+                        board_init(&mp.g.board, ms.w, ms.h, ms.mines);
+                        mp.status_line[0] = '\0';
+                    }
+                    break;
+                }
+                case MSG_BOARD_STATE: {
+                    MsgBoardState ws;
+                    if (unpack_board_state(frame.payload, frame.len, &ws)) {
+                        wire_to_board(&ws, &mp.g.board);
+                        mp.mines_left = ws.mines_left;
+                        mp.scores[0] = ws.scores[0];
+                        mp.scores[1] = ws.scores[1];
+                    }
+                    break;
+                }
+                case MSG_TURN: {
+                    MsgTurn t;
+                    if (unpack_turn(frame.payload, frame.len, &t))
+                        mp.player_to_move = t.player_id_to_move;
+                    break;
+                }
+                case MSG_OPPONENT_STATUS: {
+                    MsgOpponentStatus st;
+                    if (unpack_opponent_status(frame.payload, frame.len, &st)) {
+                        if (st.state == OPP_DISCONNECTED)
+                            snprintf(mp.status_line, sizeof(mp.status_line),
+                                     "%s disconnected - waiting up to %ds...",
+                                     mp.opponent_name, st.grace_seconds);
+                        else
+                            mp.status_line[0] = '\0';
+                    }
+                    break;
+                }
+                case MSG_MATCH_END: {
+                    MsgMatchEnd me;
+                    if (unpack_match_end(frame.payload, frame.len, &me)) {
+                        mp.scores[0] = me.scores[0];
+                        mp.scores[1] = me.scores[1];
+                        return mp_show_end_screen(&mp, (MatchEndReason)me.reason);
+                    }
+                    break;
+                }
+                case MSG_ERROR: {
+                    MsgError em;
+                    if (unpack_error(frame.payload, frame.len, &em))
+                        snprintf(mp.status_line, sizeof(mp.status_line), "Server: %s", em.message);
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+
+        if (r > 0 && FD_ISSET(term_fd, &rfds)) {
+            int ch = getch();
+            if (ch == 'q' || ch == 'Q') { net_close(mp.nc); return AFTER_QUIT; }
+            if (ch == 'n' || ch == 'N') { net_close(mp.nc); return AFTER_MENU; }
+            if (!matched)
+                continue; /* ignore game keys while still queued */
+
+            switch (ch) {
+                case KEY_UP: case 'k':
+                    if (mp.g.cursor_y > 0) mp.g.cursor_y--;
+                    break;
+                case KEY_DOWN: case 'j':
+                    if (mp.g.cursor_y < mp.g.board.h - 1) mp.g.cursor_y++;
+                    break;
+                case KEY_LEFT: case 'h':
+                    if (mp.g.cursor_x > 0) mp.g.cursor_x--;
+                    break;
+                case KEY_RIGHT: case 'l':
+                    if (mp.g.cursor_x < mp.g.board.w - 1) mp.g.cursor_x++;
+                    break;
+                case ' ': case '\n': case KEY_ENTER: {
+                    bool revealed = mp.g.board.cells[mp.g.cursor_y][mp.g.cursor_x].revealed;
+                    uint8_t abuf[2] = { (uint8_t)mp.g.cursor_x, (uint8_t)mp.g.cursor_y };
+                    net_send_frame(mp.nc->ssl, revealed ? MSG_ACTION_CHORD : MSG_ACTION_REVEAL, abuf, 2);
+                    break;
+                }
+                case 'f': case 'F': {
+                    Cell *c = &mp.g.board.cells[mp.g.cursor_y][mp.g.cursor_x];
+                    uint8_t abuf[3] = { (uint8_t)mp.g.cursor_x, (uint8_t)mp.g.cursor_y, (uint8_t)(c->flagged ? 0 : 1) };
+                    net_send_frame(mp.nc->ssl, MSG_ACTION_FLAG, abuf, 3);
+                    break;
+                }
+                case 'c': case 'C': {
+                    uint8_t abuf[2] = { (uint8_t)mp.g.cursor_x, (uint8_t)mp.g.cursor_y };
+                    net_send_frame(mp.nc->ssl, MSG_ACTION_CHORD, abuf, 2);
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+    }
+}
+
+static MenuChoice menu(Difficulty *custom_out, MPConnectInfo *mp_out)
 {
     const char *title = "ASCIISWEEPER";
     const char *subtitle = "a terminal minesweeper";
@@ -330,11 +680,12 @@ static MenuChoice menu(Difficulty *custom_out)
         "Beginner     (9x9, 10 mines)",
         "Intermediate (16x16, 40 mines)",
         "Expert       (30x16, 99 mines)",
+        "Multiplayer  (16x16, 40 mines, online)",
         "Custom...",
         "Quit"
     };
     const char *hint = "Move: up/down or j/k   Select: enter/space   Quit: q";
-    int n = 5;
+    int n = 6;
     int sel = 0;
     wtimeout(stdscr, -1); /* blocking while in menu */
     clear(); /* force a full physical redraw when coming from a differently-shaped screen */
@@ -382,8 +733,8 @@ static MenuChoice menu(Difficulty *custom_out)
                 sel = (sel + 1) % n;
                 break;
             case '\n': case ' ': case KEY_ENTER:
-                if (sel == 4) return MENU_QUIT;
-                if (sel == 3) {
+                if (sel == 5) return MENU_QUIT;
+                if (sel == 4) {
                     int w, h, m;
                     int prow = top + 3 + n + 3;
                     prompt_int("Width",  prow,     left, 5, MAX_W, 16, &w);
@@ -395,6 +746,20 @@ static MenuChoice menu(Difficulty *custom_out)
                     custom_out->h = h;
                     custom_out->mines = m;
                     return MENU_CUSTOM;
+                }
+                if (sel == 3) {
+                    int prow = top + 3 + n + 3;
+                    int port;
+                    prompt_str("Server host", prow, left, "localhost", mp_out->host, sizeof(mp_out->host));
+                    prompt_int("Port", prow + 1, left, 1, 65535, 4443, &port);
+                    mp_out->port = port;
+                    prompt_str("Your name", prow + 2, left, "Player", mp_out->name, sizeof(mp_out->name));
+                    char ca[256];
+                    prompt_str("CA file (blank = system trust)", prow + 3, left, "", ca, sizeof(ca));
+                    mp_out->have_ca_file = ca[0] != '\0';
+                    if (mp_out->have_ca_file)
+                        strncpy(mp_out->ca_file, ca, sizeof(mp_out->ca_file) - 1);
+                    return MENU_MULTIPLAYER;
                 }
                 return (MenuChoice)sel;
             case 'q': case 'Q':
@@ -428,7 +793,18 @@ int main(void)
     bool running = true;
     while (running) {
         Difficulty custom = { 0, 0, 0 };
-        MenuChoice choice = menu(&custom);
+        MPConnectInfo mpinfo = { .port = 4443 };
+        MenuChoice choice = menu(&custom, &mpinfo);
+
+        if (choice == MENU_MULTIPLAYER) {
+            AfterGame after = play_multiplayer(mpinfo.host, mpinfo.port,
+                                                mpinfo.have_ca_file ? mpinfo.ca_file : NULL,
+                                                mpinfo.name);
+            if (after == AFTER_QUIT)
+                running = false;
+            continue;
+        }
+
         Difficulty d;
 
         switch (choice) {
@@ -436,6 +812,7 @@ int main(void)
             case MENU_INTERMEDIATE: d = PRESETS[1]; break;
             case MENU_EXPERT: d = PRESETS[2]; break;
             case MENU_CUSTOM: d = custom; break;
+            case MENU_MULTIPLAYER: /* handled above */
             case MENU_QUIT:
             default:
                 running = false;

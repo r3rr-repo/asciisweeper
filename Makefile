@@ -1,18 +1,30 @@
 CC       := cc
 CFLAGS   := -Wall -Wextra -std=c11 -O2
-LDLIBS   := -lncurses
-SRC      := src/main.c src/board.c
-BIN      := asciisweeper
+SSL_CFLAGS := $(shell pkg-config --cflags openssl)
+SSL_LIBS   := $(shell pkg-config --libs openssl)
 
-.PHONY: all clean run
+COMMON_SRC  := src/board.c src/net_io.c
+CLIENT_SRC  := src/main.c src/client_net.c $(COMMON_SRC)
+SERVER_SRC  := src/server.c $(COMMON_SRC)
 
-all: $(BIN)
+CLIENT_BIN := asciisweeper
+SERVER_BIN := asciisweeper-server
 
-$(BIN): $(SRC) src/board.h
-	$(CC) $(CFLAGS) -o $(BIN) $(SRC) $(LDLIBS)
+.PHONY: all clean run run-server
 
-run: $(BIN)
-	./$(BIN)
+all: $(CLIENT_BIN) $(SERVER_BIN)
+
+$(CLIENT_BIN): $(CLIENT_SRC)
+	$(CC) $(CFLAGS) $(SSL_CFLAGS) -o $(CLIENT_BIN) $(CLIENT_SRC) -lncurses $(SSL_LIBS)
+
+$(SERVER_BIN): $(SERVER_SRC)
+	$(CC) $(CFLAGS) $(SSL_CFLAGS) -o $(SERVER_BIN) $(SERVER_SRC) $(SSL_LIBS) -lpthread
+
+run: $(CLIENT_BIN)
+	./$(CLIENT_BIN)
+
+run-server: $(SERVER_BIN)
+	./$(SERVER_BIN)
 
 clean:
-	rm -f $(BIN)
+	rm -f $(CLIENT_BIN) $(SERVER_BIN)

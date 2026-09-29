@@ -21,14 +21,13 @@ bool net_recv_frame(SSL *ssl, NetFrame *out);
 
 typedef enum { NET_OK, NET_TIMEOUT, NET_CLOSED, NET_ERROR } NetResult;
 
-/* Like net_recv_frame, but distinguishes "no frame arrived before the
- * socket's SO_RCVTIMEO elapsed" (NET_TIMEOUT, connection still alive - the
- * caller should loop and retry) from a genuine disconnect (NET_CLOSED) or
- * hard error (NET_ERROR). Only a timeout on the very first byte of a new
- * frame is reported as NET_TIMEOUT; once any byte of a frame has been
- * read, a further stall is NET_ERROR, since resuming mid-frame after a
- * partial read is not safe. Requires SO_RCVTIMEO to be set on the
- * underlying socket. */
+/* Like net_recv_frame, but distinguishes "no frame arrived within a 1s
+ * poll()" (NET_TIMEOUT, connection still alive - the caller should loop
+ * and retry) from a genuine disconnect (NET_CLOSED) or hard error
+ * (NET_ERROR). Only a timeout on the very first byte of a new frame is
+ * reported as NET_TIMEOUT; once any byte of a frame has been read, a
+ * further stall is NET_ERROR, since resuming mid-frame after a partial
+ * read is not safe. */
 NetResult net_recv_frame_ex(SSL *ssl, NetFrame *out);
 
 /* Pack: serialize a message struct into a payload buffer (caller-provided,
