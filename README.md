@@ -34,6 +34,8 @@ flagging, chording, and a live timer — all in your terminal.
   mine count
 - Board and menu automatically center in your terminal window
 - Color-coded numbers, just like the original
+- **Turn-based multiplayer** over TLS: queue up, get matched with an
+  opponent, and take turns on a shared board (see below)
 
 ## Requirements
 
@@ -42,6 +44,11 @@ flagging, chording, and a live timer — all in your terminal.
   - macOS: included with Xcode Command Line Tools, or `brew install ncurses`
   - Debian/Ubuntu: `sudo apt install libncurses-dev`
   - Fedora: `sudo dnf install ncurses-devel`
+- OpenSSL development headers (for multiplayer; the single-player game
+  doesn't need them, but the client and server binaries link against them)
+  - macOS: `brew install openssl`
+  - Debian/Ubuntu: `sudo apt install libssl-dev`
+  - Fedora: `sudo dnf install openssl-devel`
 
 ## Build & run
 
@@ -55,6 +62,8 @@ or in one step:
 ```sh
 make run
 ```
+
+`make` also builds `asciisweeper-server`, the multiplayer server binary.
 
 ## Controls
 
@@ -80,10 +89,64 @@ already-revealed number.
 | Expert       | 30x16  | 99    |
 | Custom       | your choice | your choice |
 
+## Multiplayer
+
+Two players share one minefield and alternate turns. A turn is one reveal
+or one chord; flagging is free and doesn't end your turn. If you click a
+bomb, you lose `mines - 1` points and the match ends; if the board is
+fully cleared without anyone hitting a bomb, both players gain `mines`
+points. Multiplayer matches are fixed at Intermediate size (16x16, 40
+mines).
+
+**Run a server:**
+
+```sh
+./asciisweeper-server --cert fullchain.pem --key privkey.pem [--port 4443]
+```
+
+The server needs a real TLS certificate and key (e.g. from Let's Encrypt
+for a public server, or a self-signed one for local testing — see below).
+It matches players FIFO: the first two to queue up get paired together.
+
+**Connect a client:** choose "Multiplayer..." from the menu and enter the
+server's host, port, your name, and (optionally) a CA file. The CA file
+lets you pin a specific certificate authority — useful for a self-hosted
+server with a private CA, or for local testing — instead of relying on
+the system's trust store. The client always verifies the server's
+certificate; it never falls back to an unverified connection.
+
+**Local testing** without a real certificate:
+
+```sh
+openssl req -x509 -newkey rsa:2048 -keyout server.key -out server.crt \
+  -days 1 -nodes -subj "/CN=localhost" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+./asciisweeper-server --cert server.crt --key server.key --port 4443
+```
+
+Then connect a client with host `127.0.0.1`, port `4443`, and `server.crt`
+as the CA file.
+
+If your connection drops mid-match, the client automatically tries to
+reconnect using your session token for up to 60 seconds before giving up
+and returning to the menu.
+
 ## How it works
 
-The whole game lives in [`src/main.c`](src/main.c): a `Game` struct holding
-the board state, an iterative flood-fill for revealing empty regions, and
-an `ncurses`-based render loop that redraws the board, HUD, and footer each
-frame. Mines are placed only after your first move, avoiding the clicked
-cell and its neighbors, so the opening reveal is always safe.
+The Minesweeper rules (board state, flood-fill reveal, flagging, chording,
+win/loss detection) live in [`src/board.c`](src/board.c), shared by the
+single-player game, the multiplayer client's rendering, and the server's
+authoritative match state — so the rules are defined once, not
+reimplemented. [`src/main.c`](src/main.c) is the ncurses client: the menu,
+the single-player game loop, and the multiplayer game loop. Mines are
+placed only after the first reveal, avoiding that cell and its neighbors,
+so the opening move is always safe.
+
+Multiplayer adds a simple binary wire protocol
+([`src/net_proto.h`](src/net_proto.h), framed and (de)serialized in
+[`src/net_io.c`](src/net_io.c)), a TLS client helper
+([`src/client_net.c`](src/client_net.c)), and a standalone matchmaking
+server ([`src/server.c`](src/server.c)) that holds the only authoritative
+copy of the board — the client never runs reveal/flood-fill/chord logic
+itself in multiplayer, it only renders whatever the server sends, which
+rules out client/server desync by construction.
