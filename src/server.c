@@ -26,6 +26,7 @@
 #include "board.h"
 #include "net_proto.h"
 #include "net_io.h"
+#include "version.h"
 
 #define MAX_QUEUE            64
 #define MAX_TOKENS           128
@@ -863,19 +864,23 @@ int main(int argc, char **argv)
     bool seed_given = false;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--cert") == 0 && i + 1 < argc) cert_path = argv[++i];
+        if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
+            printf("asciisweeper-server %s\n", ASCIISWEEPER_VERSION);
+            return 0;
+        }
+        else if (strcmp(argv[i], "--cert") == 0 && i + 1 < argc) cert_path = argv[++i];
         else if (strcmp(argv[i], "--key") == 0 && i + 1 < argc) key_path = argv[++i];
         else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) port = atoi(argv[++i]);
         else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) { seed = (unsigned)atoi(argv[++i]); seed_given = true; }
         else {
-            fprintf(stderr, "Usage: %s --cert <chain.pem> --key <key.pem> [--port %d] [--seed N]\n",
-                    argv[0], port);
+            fprintf(stderr, "Usage: %s --cert <chain.pem> --key <key.pem> [--port %d] [--seed N]\n       %s -v | --version\n",
+                    argv[0], port, argv[0]);
             return 1;
         }
     }
     if (!cert_path || !key_path) {
-        fprintf(stderr, "Usage: %s --cert <chain.pem> --key <key.pem> [--port %d] [--seed N]\n",
-                argv[0], port);
+        fprintf(stderr, "Usage: %s --cert <chain.pem> --key <key.pem> [--port %d] [--seed N]\n       %s -v | --version\n",
+                argv[0], port, argv[0]);
         return 1;
     }
 
@@ -907,7 +912,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    log_line("asciisweeper-server listening on port %d", port);
+    log_line("asciisweeper-server %s listening on port %d", ASCIISWEEPER_VERSION, port);
 
     while (!g_shutdown) {
         struct sockaddr_in client_addr;
