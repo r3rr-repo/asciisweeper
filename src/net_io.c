@@ -263,6 +263,18 @@ bool unpack_action_chord(const uint8_t *buf, size_t len, MsgActionChord *out)
     return true;
 }
 
+size_t pack_chat(uint8_t *buf, const MsgChat *m)
+{
+    Writer w; w_init(&w, buf);
+    put_cstr_fixed(&w, m->text, NET_CHAT_MSG_LEN);
+    return w.pos;
+}
+bool unpack_chat(const uint8_t *buf, size_t len, MsgChat *out)
+{
+    Reader r; r_init(&r, buf, len);
+    return get_cstr_fixed(&r, out->text, NET_CHAT_MSG_LEN);
+}
+
 size_t pack_welcome(uint8_t *buf, const MsgWelcome *m)
 {
     Writer w; w_init(&w, buf);
@@ -441,6 +453,18 @@ bool unpack_error(const uint8_t *buf, size_t len, MsgError *out)
     if (!get_cstr_fixed(&r, tmp, NET_ERR_MSG_LEN)) return false;
     memcpy(out->message, tmp, NET_ERR_MSG_LEN);
     return true;
+}
+
+size_t pack_chat_recv(uint8_t *buf, const MsgChatRecv *m)
+{
+    Writer w; w_init(&w, buf);
+    put_cstr_fixed(&w, m->text, NET_CHAT_MSG_LEN);
+    return w.pos;
+}
+bool unpack_chat_recv(const uint8_t *buf, size_t len, MsgChatRecv *out)
+{
+    Reader r; r_init(&r, buf, len);
+    return get_cstr_fixed(&r, out->text, NET_CHAT_MSG_LEN);
 }
 
 /* ---- Board <-> wire snapshot ---- */

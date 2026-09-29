@@ -5,11 +5,12 @@
 #include <stddef.h>
 #include "board.h"
 
-#define NET_PROTO_VERSION   2
+#define NET_PROTO_VERSION   3
 #define NET_MAX_PAYLOAD     8192
 #define NET_MAX_NAME_LEN    16
 #define NET_TOKEN_LEN       16
 #define NET_ERR_MSG_LEN     64
+#define NET_CHAT_MSG_LEN    120
 
 /* Fixed board size for multiplayer matches (v1: no per-match negotiation). */
 #define MP_BOARD_W  16
@@ -24,6 +25,7 @@ typedef enum {
     MSG_ACTION_FLAG    = 0x04,
     MSG_ACTION_CHORD   = 0x05,
     MSG_PING           = 0x06,
+    MSG_CHAT           = 0x07,
 
     /* server -> client */
     MSG_WELCOME         = 0x81,
@@ -36,6 +38,7 @@ typedef enum {
     MSG_ERROR           = 0x88,
     MSG_RECONNECT_OK    = 0x89,
     MSG_PONG            = 0x8A,
+    MSG_CHAT_RECV       = 0x8B,
 } MsgType;
 
 typedef enum {
@@ -85,6 +88,10 @@ typedef struct {
 typedef struct {
     uint8_t x, y;
 } MsgActionChord;
+
+typedef struct {
+    char text[NET_CHAT_MSG_LEN + 1];
+} MsgChat;
 
 /* --- server -> client payloads --- */
 
@@ -155,5 +162,11 @@ typedef struct {
     uint8_t code;
     char message[NET_ERR_MSG_LEN];
 } MsgError;
+
+/* Relayed to the *other* player in the match; the recipient always
+ * attributes it to their one opponent, so no sender field is needed. */
+typedef struct {
+    char text[NET_CHAT_MSG_LEN + 1];
+} MsgChatRecv;
 
 #endif

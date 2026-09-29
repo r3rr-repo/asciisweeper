@@ -375,6 +375,13 @@ static void sanitize_name(char *name)
         strncpy(name, "Player", NET_MAX_NAME_LEN);
 }
 
+static void sanitize_chat(char *text)
+{
+    for (int i = 0; text[i]; i++)
+        if (!isprint((unsigned char)text[i]))
+            text[i] = ' ';
+}
+
 /* ---------------- match play ---------------- */
 
 static void broadcast_board_state(Match *m)
@@ -534,6 +541,33 @@ static void apply_action_and_broadcast(Match *m, int player_index, uint8_t type,
     }
 }
 
+/* Relays a chat line to whichever slot is the sender's opponent, if that
+ * slot currently has a live connection. No-op (message just drops) if the
+ * opponent isn't connected right now - there's no queueing/backlog. */
+static void relay_chat(Match *m, int player_index, const uint8_t *payload, size_t len)
+{
+    MsgChat in;
+    if (!unpack_chat(payload, len, &in))
+        return;
+    sanitize_chat(in.text);
+    if (in.text[0] == '\0')
+        return;
+
+    pthread_mutex_lock(&m->lock);
+    Connection *opponent = m->connected[1 - player_index] ? m->conns[1 - player_index] : NULL;
+    pthread_mutex_unlock(&m->lock);
+
+    if (!opponent)
+        return;
+
+    MsgChatRecv out;
+    strncpy(out.text, in.text, NET_CHAT_MSG_LEN);
+    out.text[NET_CHAT_MSG_LEN] = '\0';
+    uint8_t buf[NET_MAX_PAYLOAD];
+    size_t n = pack_chat_recv(buf, &out);
+    net_send_frame(opponent->ssl, MSG_CHAT_RECV, buf, n);
+}
+
 /* Waits up to RECONNECT_GRACE_SECONDS for the given player slot to
  * reconnect (polled once a second). Returns true if it reconnected. */
 static bool wait_for_reconnect(Match *m, int player_index)
@@ -610,6 +644,10 @@ static void play_match(Connection *conn, Match *m, int player_index)
         }
         if (frame.type == MSG_ACTION_REVEAL || frame.type == MSG_ACTION_FLAG || frame.type == MSG_ACTION_CHORD) {
             apply_action_and_broadcast(m, player_index, frame.type, frame.payload, frame.len);
+            continue;
+        }
+        if (frame.type == MSG_CHAT) {
+            relay_chat(m, player_index, frame.payload, frame.len);
             continue;
         }
         /* Unrecognized message type while in a match: ignore rather than
