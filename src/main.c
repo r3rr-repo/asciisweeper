@@ -15,6 +15,7 @@
 #include "net_proto.h"
 #include "net_io.h"
 #include "client_net.h"
+#include "version.h"
 
 typedef struct {
     Board board;
@@ -688,7 +689,7 @@ static AfterGame play_multiplayer(const char *host, int port, const char *ca_fil
 static MenuChoice menu(Difficulty *custom_out, MPConnectInfo *mp_out)
 {
     const char *title = "ASCIISWEEPER";
-    const char *subtitle = "a terminal minesweeper";
+    const char *subtitle = "a terminal minesweeper  -  " ASCIISWEEPER_VERSION;
     const char *labels[] = {
         "Beginner     (9x9, 10 mines)",
         "Intermediate (16x16, 40 mines)",
@@ -783,8 +784,15 @@ static MenuChoice menu(Difficulty *custom_out, MPConnectInfo *mp_out)
     }
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
+            printf("asciisweeper %s\n", ASCIISWEEPER_VERSION);
+            return 0;
+        }
+    }
+
     srand((unsigned)time(NULL));
 
     initscr();
