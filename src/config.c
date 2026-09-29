@@ -67,7 +67,14 @@ void config_load(Config *cfg)
 
 void config_save(const Config *cfg)
 {
-    char dir[512], path[512];
+    const char *home = getenv("HOME");
+    if (!home || !home[0])
+        return;
+
+    char config_home[512], dir[512], path[512];
+    snprintf(config_home, sizeof(config_home), "%s/.config", home);
+    mkdir(config_home, 0755); /* mkdir isn't recursive - ~/.config may not exist yet */
+
     if (!config_path(dir, sizeof(dir), CONFIG_DIR_FMT))
         return;
     if (!config_path(path, sizeof(path), CONFIG_FILE_FMT))
