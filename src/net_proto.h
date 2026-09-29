@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include "board.h"
 
-#define NET_PROTO_VERSION   1
+#define NET_PROTO_VERSION   2
 #define NET_MAX_PAYLOAD     8192
 #define NET_MAX_NAME_LEN    16
 #define NET_TOKEN_LEN       16
@@ -65,6 +65,8 @@ typedef enum {
 typedef struct {
     uint8_t protocol_version;
     char name[NET_MAX_NAME_LEN + 1];
+    uint8_t avatar_skin;
+    uint8_t avatar_hair;
 } MsgHello;
 
 typedef struct {
@@ -99,6 +101,8 @@ typedef struct {
     uint8_t w, h;
     uint16_t mines;
     char opponent_name[NET_MAX_NAME_LEN + 1];
+    uint8_t opponent_avatar_skin;
+    uint8_t opponent_avatar_hair;
     uint8_t your_player_id;
     uint8_t first_to_move;
     uint8_t session_token[NET_TOKEN_LEN];
@@ -109,6 +113,8 @@ typedef struct {
     uint8_t w, h;
     uint16_t mines;
     char opponent_name[NET_MAX_NAME_LEN + 1];
+    uint8_t opponent_avatar_skin;
+    uint8_t opponent_avatar_hair;
 } MsgReconnectOk;
 
 /* Cell byte layout: bit7 revealed, bit6 flagged, bit5 is_mine (only

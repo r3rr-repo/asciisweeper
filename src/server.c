@@ -88,6 +88,7 @@ typedef struct Connection {
     int fd;
     struct in_addr ip;
     char name[NET_MAX_NAME_LEN + 1];
+    uint8_t avatar_skin, avatar_hair;
 
     pthread_mutex_t state_lock;
     struct Match *assigned_match; /* set by whichever thread completes the pairing */
@@ -128,6 +129,7 @@ typedef struct Match {
     time_t disconnected_at[2];
     uint8_t token[2][NET_TOKEN_LEN];
     char names[2][NET_MAX_NAME_LEN + 1];
+    uint8_t avatar_skin[2], avatar_hair[2];
     bool active;
     int refcount; /* one per thread still working on this match; freed at 0 */
 } Match;
@@ -242,6 +244,10 @@ static int queue_join_and_maybe_pair(Connection *conn)
         m->refcount = 2;
         strncpy(m->names[0], a->name, NET_MAX_NAME_LEN);
         strncpy(m->names[1], b->name, NET_MAX_NAME_LEN);
+        m->avatar_skin[0] = a->avatar_skin;
+        m->avatar_hair[0] = a->avatar_hair;
+        m->avatar_skin[1] = b->avatar_skin;
+        m->avatar_hair[1] = b->avatar_hair;
         RAND_bytes(m->token[0], NET_TOKEN_LEN);
         RAND_bytes(m->token[1], NET_TOKEN_LEN);
         token_register(m->token[0], m, 0);
@@ -657,6 +663,8 @@ static void handle_connection(Connection *conn)
         char my_name[NET_MAX_NAME_LEN + 1];
         strncpy(my_name, m->names[player_index], NET_MAX_NAME_LEN);
         my_name[NET_MAX_NAME_LEN] = '\0';
+        uint8_t opp_avatar_skin = m->avatar_skin[1 - player_index];
+        uint8_t opp_avatar_hair = m->avatar_hair[1 - player_index];
         uint8_t w = (uint8_t)m->board.w, h = (uint8_t)m->board.h;
         uint16_t mines = (uint16_t)m->board.mines;
         Connection *opponent = active && m->connected[1 - player_index] ? m->conns[1 - player_index] : NULL;
@@ -671,7 +679,9 @@ static void handle_connection(Connection *conn)
         log_line("%s (%s) reconnected to match vs %s", my_name, conn_ip, opp_name);
 
         MsgReconnectOk ok = { .your_player_id = (uint8_t)player_index, .w = w, .h = h,
-                               .mines = mines };
+                               .mines = mines,
+                               .opponent_avatar_skin = opp_avatar_skin,
+                               .opponent_avatar_hair = opp_avatar_hair };
         strncpy(ok.opponent_name, opp_name, NET_MAX_NAME_LEN);
         uint8_t buf[NET_MAX_PAYLOAD];
         size_t n = pack_reconnect_ok(buf, &ok);
@@ -707,6 +717,8 @@ static void handle_connection(Connection *conn)
     }
     sanitize_name(hello.name);
     strncpy(conn->name, hello.name, NET_MAX_NAME_LEN);
+    conn->avatar_skin = hello.avatar_skin;
+    conn->avatar_hair = hello.avatar_hair;
 
     if (!rate_allow_join(conn->ip)) {
         log_line("%s (%s) rejected: too many queued/active connections from this IP", conn->name, conn_ip);
@@ -735,6 +747,8 @@ static void handle_connection(Connection *conn)
             if (m) {
                 MsgMatchStart ms = { .w = (uint8_t)m->board.w, .h = (uint8_t)m->board.h,
                                       .mines = (uint16_t)m->board.mines,
+                                      .opponent_avatar_skin = m->avatar_skin[1 - pidx],
+                                      .opponent_avatar_hair = m->avatar_hair[1 - pidx],
                                       .your_player_id = (uint8_t)pidx,
                                       .first_to_move = (m->player_to_move == pidx) ? 1 : 0 };
                 strncpy(ms.opponent_name, m->names[1 - pidx], NET_MAX_NAME_LEN);
@@ -773,6 +787,8 @@ static void handle_connection(Connection *conn)
 
         MsgMatchStart ms = { .w = (uint8_t)m->board.w, .h = (uint8_t)m->board.h,
                               .mines = (uint16_t)m->board.mines,
+                              .opponent_avatar_skin = m->avatar_skin[1 - pidx],
+                              .opponent_avatar_hair = m->avatar_hair[1 - pidx],
                               .your_player_id = (uint8_t)pidx,
                               .first_to_move = (m->player_to_move == pidx) ? 1 : 0 };
         strncpy(ms.opponent_name, m->names[1 - pidx], NET_MAX_NAME_LEN);
