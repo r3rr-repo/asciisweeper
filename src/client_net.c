@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
 #include <netdb.h>
 #include <arpa/inet.h>
 
@@ -54,10 +55,19 @@ NetConn *net_connect(const char *host, int port, const char *ca_file)
     SSL_set_fd(ssl, fd);
     if (host_is_ip_literal(host)) {
         /* IP literals verify against the cert's iPAddress SAN entries, not
-         * its dNSName entries - SNI doesn't apply to them either. */
-        SSL_set1_ipaddr(ssl, host);
+         * its dNSName entries - SNI doesn't apply to them either. There is
+         * no SSL_set1_ipaddr() wrapper in widely-deployed OpenSSL, so go
+         * through X509_VERIFY_PARAM directly (portable since 1.1.0). */
+        X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(ssl), host);
     } else {
-        SSL_set1_dnsname(ssl, host);
+        /* SSL_set1_host() is the portable, universally-available API for
+         * this (present since OpenSSL 1.1.0). Some very new OpenSSL builds
+         * deprecate it in favor of SSL_set1_dnsname(), but that name isn't
+         * available on the OpenSSL versions most systems actually ship, so
+         * stick with SSL_set1_host() and accept the deprecation warning on
+         * bleeding-edge OpenSSL rather than breaking the build everywhere
+         * else. */
+        SSL_set1_host(ssl, host);
         SSL_set_tlsext_host_name(ssl, host);
     }
 
