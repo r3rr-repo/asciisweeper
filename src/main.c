@@ -9,29 +9,13 @@
 #include <time.h>
 #include <stdbool.h>
 
-#define MAX_W 60
-#define MAX_H 30
+#include "board.h"
 
 typedef struct {
-    bool mine;
-    bool revealed;
-    bool flagged;
-    int adjacent;
-} Cell;
-
-typedef enum { STATE_PLAYING, STATE_WON, STATE_LOST } GameStatus;
-
-typedef struct {
-    int w, h, mines;
-    Cell board[MAX_H][MAX_W];
+    Board board;
     int cursor_x, cursor_y;
-    int flags_placed;
-    int revealed_count;
-    bool first_move;
     time_t start_time;
     int elapsed;
-    GameStatus status;
-    int exploded_x, exploded_y;
     int top, left; /* screen origin of the board, for centering */
 } Game;
 
@@ -88,15 +72,9 @@ static int color_for_number(int n)
 static void game_init(Game *g, int w, int h, int mines)
 {
     memset(g, 0, sizeof(*g));
-    g->w = w;
-    g->h = h;
-    g->mines = mines;
+    board_init(&g->board, w, h, mines);
     g->cursor_x = w / 2;
     g->cursor_y = h / 2;
-    g->first_move = true;
-    g->status = STATE_PLAYING;
-    g->exploded_x = -1;
-    g->exploded_y = -1;
 
     int scr_h, scr_w;
     getmaxyx(stdscr, scr_h, scr_w);
@@ -110,196 +88,21 @@ static void game_init(Game *g, int w, int h, int mines)
     g->left = origin_x + 1;
 }
 
-static bool in_bounds(Game *g, int x, int y)
-{
-    return x >= 0 && x < g->w && y >= 0 && y < g->h;
-}
-
-static void place_mines(Game *g, int avoid_x, int avoid_y)
-{
-    int placed = 0;
-    while (placed < g->mines) {
-        int x = rand() % g->w;
-        int y = rand() % g->h;
-        if (abs(x - avoid_x) <= 1 && abs(y - avoid_y) <= 1)
-            continue;
-        if (g->board[y][x].mine)
-            continue;
-        g->board[y][x].mine = true;
-        placed++;
-    }
-
-    for (int y = 0; y < g->h; y++) {
-        for (int x = 0; x < g->w; x++) {
-            if (g->board[y][x].mine)
-                continue;
-            int count = 0;
-            for (int dy = -1; dy <= 1; dy++) {
-                for (int dx = -1; dx <= 1; dx++) {
-                    if (dx == 0 && dy == 0) continue;
-                    if (in_bounds(g, x + dx, y + dy) && g->board[y + dy][x + dx].mine)
-                        count++;
-                }
-            }
-            g->board[y][x].adjacent = count;
-        }
-    }
-}
-
-static void reveal_all_mines(Game *g)
-{
-    for (int y = 0; y < g->h; y++)
-        for (int x = 0; x < g->w; x++)
-            if (g->board[y][x].mine)
-                g->board[y][x].revealed = true;
-}
-
-static void check_win(Game *g)
-{
-    if (g->revealed_count == g->w * g->h - g->mines) {
-        g->status = STATE_WON;
-        for (int y = 0; y < g->h; y++)
-            for (int x = 0; x < g->w; x++)
-                if (g->board[y][x].mine)
-                    g->board[y][x].flagged = true;
-        g->flags_placed = g->mines;
-    }
-}
-
-/* Iterative flood fill starting at (sx, sy); (sx, sy) is guaranteed safe. */
-static void flood_reveal(Game *g, int sx, int sy)
-{
-    int stack_x[MAX_W * MAX_H];
-    int stack_y[MAX_W * MAX_H];
-    int sp = 0;
-    stack_x[sp] = sx;
-    stack_y[sp] = sy;
-    sp++;
-
-    while (sp > 0) {
-        sp--;
-        int x = stack_x[sp];
-        int y = stack_y[sp];
-        if (!in_bounds(g, x, y))
-            continue;
-        Cell *c = &g->board[y][x];
-        if (c->revealed || c->flagged)
-            continue;
-        c->revealed = true;
-        g->revealed_count++;
-        if (c->adjacent == 0) {
-            for (int dy = -1; dy <= 1; dy++) {
-                for (int dx = -1; dx <= 1; dx++) {
-                    if (dx == 0 && dy == 0) continue;
-                    int nx = x + dx, ny = y + dy;
-                    if (in_bounds(g, nx, ny) && !g->board[ny][nx].revealed && !g->board[ny][nx].flagged)
-                        if (sp < MAX_W * MAX_H) {
-                            stack_x[sp] = nx;
-                            stack_y[sp] = ny;
-                            sp++;
-                        }
-                }
-            }
-        }
-    }
-}
-
-static void reveal_cell(Game *g, int x, int y)
-{
-    if (g->status != STATE_PLAYING)
-        return;
-    Cell *c = &g->board[y][x];
-    if (c->flagged || c->revealed)
-        return;
-
-    if (g->first_move) {
-        place_mines(g, x, y);
-        g->first_move = false;
-        g->start_time = time(NULL);
-    }
-
-    if (c->mine) {
-        c->revealed = true;
-        g->exploded_x = x;
-        g->exploded_y = y;
-        g->status = STATE_LOST;
-        reveal_all_mines(g);
-        return;
-    }
-
-    flood_reveal(g, x, y);
-    check_win(g);
-}
-
-static void toggle_flag(Game *g, int x, int y)
-{
-    if (g->status != STATE_PLAYING)
-        return;
-    Cell *c = &g->board[y][x];
-    if (c->revealed)
-        return;
-    if (g->first_move)
-        return; /* nothing to flag before mines exist */
-    c->flagged = !c->flagged;
-    g->flags_placed += c->flagged ? 1 : -1;
-}
-
-static void chord_cell(Game *g, int x, int y)
-{
-    if (g->status != STATE_PLAYING)
-        return;
-    Cell *c = &g->board[y][x];
-    if (!c->revealed || c->adjacent == 0)
-        return;
-
-    int flagged = 0;
-    for (int dy = -1; dy <= 1; dy++)
-        for (int dx = -1; dx <= 1; dx++) {
-            if (dx == 0 && dy == 0) continue;
-            int nx = x + dx, ny = y + dy;
-            if (in_bounds(g, nx, ny) && g->board[ny][nx].flagged)
-                flagged++;
-        }
-
-    if (flagged != c->adjacent)
-        return;
-
-    for (int dy = -1; dy <= 1; dy++) {
-        for (int dx = -1; dx <= 1; dx++) {
-            if (dx == 0 && dy == 0) continue;
-            int nx = x + dx, ny = y + dy;
-            if (!in_bounds(g, nx, ny)) continue;
-            Cell *n = &g->board[ny][nx];
-            if (n->flagged || n->revealed) continue;
-            if (n->mine) {
-                n->revealed = true;
-                g->exploded_x = nx;
-                g->exploded_y = ny;
-                g->status = STATE_LOST;
-                reveal_all_mines(g);
-                return;
-            }
-            flood_reveal(g, nx, ny);
-        }
-    }
-    check_win(g);
-}
-
 static void draw_board_frame(Game *g)
 {
     int top = g->top, left = g->left;
     attron(COLOR_PAIR(CP_HUD));
     mvaddch(top - 1, left - 1, '+');
-    mvaddch(top - 1, left + g->w * 2, '+');
-    mvaddch(top + g->h, left - 1, '+');
-    mvaddch(top + g->h, left + g->w * 2, '+');
-    for (int x = 0; x < g->w * 2; x++) {
+    mvaddch(top - 1, left + g->board.w * 2, '+');
+    mvaddch(top + g->board.h, left - 1, '+');
+    mvaddch(top + g->board.h, left + g->board.w * 2, '+');
+    for (int x = 0; x < g->board.w * 2; x++) {
         mvaddch(top - 1, left + x, '-');
-        mvaddch(top + g->h, left + x, '-');
+        mvaddch(top + g->board.h, left + x, '-');
     }
-    for (int y = 0; y < g->h; y++) {
+    for (int y = 0; y < g->board.h; y++) {
         mvaddch(top + y, left - 1, '|');
-        mvaddch(top + y, left + g->w * 2, '|');
+        mvaddch(top + y, left + g->board.w * 2, '|');
     }
     attroff(COLOR_PAIR(CP_HUD));
 }
@@ -308,7 +111,7 @@ static void draw_hud(Game *g)
 {
     int top = g->top, left = g->left;
     const char *title = "ASCIISWEEPER";
-    int board_width = g->w * 2;
+    int board_width = g->board.w * 2;
     int title_col = left + (board_width - (int)strlen(title)) / 2;
     if (title_col < 0) title_col = 0;
 
@@ -316,9 +119,9 @@ static void draw_hud(Game *g)
     mvprintw(top - 4, title_col, "%s", title);
     attroff(COLOR_PAIR(CP_TITLE) | A_BOLD);
 
-    int elapsed = g->first_move ? 0 : g->elapsed;
+    int elapsed = g->board.first_move ? 0 : g->elapsed;
     if (elapsed > 999) elapsed = 999;
-    int mines_left = g->mines - g->flags_placed;
+    int mines_left = g->board.mines - g->board.flags_placed;
 
     char status_line[40];
     snprintf(status_line, sizeof(status_line), "Mines: %03d    Time: %03d",
@@ -345,22 +148,22 @@ static void draw_footer(Game *g)
     if (col2 < 0) col2 = 0;
 
     attron(COLOR_PAIR(CP_HUD));
-    mvprintw(g->top + g->h + 2, col1, "%s", line1);
-    mvprintw(g->top + g->h + 3, col2, "%s", line2);
+    mvprintw(g->top + g->board.h + 2, col1, "%s", line1);
+    mvprintw(g->top + g->board.h + 3, col2, "%s", line2);
     attroff(COLOR_PAIR(CP_HUD));
 }
 
 static void draw_board(Game *g)
 {
-    for (int y = 0; y < g->h; y++) {
-        for (int x = 0; x < g->w; x++) {
-            Cell *c = &g->board[y][x];
+    for (int y = 0; y < g->board.h; y++) {
+        for (int x = 0; x < g->board.w; x++) {
+            Cell *c = &g->board.cells[y][x];
             chtype ch;
             int pair;
             bool bold = false;
 
             if (c->flagged) {
-                if (g->status == STATE_LOST && !c->mine) {
+                if (g->board.status == STATE_LOST && !c->mine) {
                     ch = 'X';
                     pair = CP_WRONG_FLAG;
                 } else {
@@ -373,7 +176,7 @@ static void draw_board(Game *g)
                 pair = CP_HIDDEN;
             } else if (c->mine) {
                 ch = '*';
-                pair = (x == g->exploded_x && y == g->exploded_y) ? CP_MINE_HIT : CP_MINE;
+                pair = (x == g->board.exploded_x && y == g->board.exploded_y) ? CP_MINE_HIT : CP_MINE;
                 bold = true;
             } else if (c->adjacent == 0) {
                 ch = ' ';
@@ -386,7 +189,7 @@ static void draw_board(Game *g)
 
             int row = g->top + y;
             int col = g->left + x * 2;
-            bool is_cursor = (x == g->cursor_x && y == g->cursor_y && g->status == STATE_PLAYING);
+            bool is_cursor = (x == g->cursor_x && y == g->cursor_y && g->board.status == STATE_PLAYING);
 
             int attrs = COLOR_PAIR(pair) | (bold ? A_BOLD : 0);
             if (is_cursor)
@@ -419,18 +222,18 @@ static AfterGame play_game(int w, int h, int mines)
     clear(); /* force a full physical redraw when coming from a differently-shaped screen */
 
     while (1) {
-        if (!g.first_move && g.status == STATE_PLAYING)
+        if (!g.board.first_move && g.board.status == STATE_PLAYING)
             g.elapsed = (int)(time(NULL) - g.start_time);
 
         render(&g);
 
-        if (g.status != STATE_PLAYING) {
-            attron(COLOR_PAIR(g.status == STATE_WON ? CP_WIN : CP_LOSE) | A_BOLD);
-            mvprintw(g.top + g.h + 5, g.left,
-                     g.status == STATE_WON ? "YOU WIN! Time: %ds" : "BOOM! Game Over.", g.elapsed);
-            attroff(COLOR_PAIR(g.status == STATE_WON ? CP_WIN : CP_LOSE) | A_BOLD);
+        if (g.board.status != STATE_PLAYING) {
+            attron(COLOR_PAIR(g.board.status == STATE_WON ? CP_WIN : CP_LOSE) | A_BOLD);
+            mvprintw(g.top + g.board.h + 5, g.left,
+                     g.board.status == STATE_WON ? "YOU WIN! Time: %ds" : "BOOM! Game Over.", g.elapsed);
+            attroff(COLOR_PAIR(g.board.status == STATE_WON ? CP_WIN : CP_LOSE) | A_BOLD);
             attron(COLOR_PAIR(CP_HUD));
-            mvprintw(g.top + g.h + 6, g.left, "[R]estart  [N]ew game  [Q]uit");
+            mvprintw(g.top + g.board.h + 6, g.left, "[R]estart  [N]ew game  [Q]uit");
             attroff(COLOR_PAIR(CP_HUD));
             refresh();
         }
@@ -439,7 +242,7 @@ static AfterGame play_game(int w, int h, int mines)
         if (ch == ERR)
             continue;
 
-        if (g.status != STATE_PLAYING) {
+        if (g.board.status != STATE_PLAYING) {
             if (ch == 'r' || ch == 'R') return AFTER_RESTART;
             if (ch == 'n' || ch == 'N') return AFTER_MENU;
             if (ch == 'q' || ch == 'Q') return AFTER_QUIT;
@@ -451,25 +254,29 @@ static AfterGame play_game(int w, int h, int mines)
                 if (g.cursor_y > 0) g.cursor_y--;
                 break;
             case KEY_DOWN: case 'j':
-                if (g.cursor_y < g.h - 1) g.cursor_y++;
+                if (g.cursor_y < g.board.h - 1) g.cursor_y++;
                 break;
             case KEY_LEFT: case 'h':
                 if (g.cursor_x > 0) g.cursor_x--;
                 break;
             case KEY_RIGHT: case 'l':
-                if (g.cursor_x < g.w - 1) g.cursor_x++;
+                if (g.cursor_x < g.board.w - 1) g.cursor_x++;
                 break;
             case ' ': case '\n': case KEY_ENTER:
-                if (g.board[g.cursor_y][g.cursor_x].revealed)
-                    chord_cell(&g, g.cursor_x, g.cursor_y);
-                else
-                    reveal_cell(&g, g.cursor_x, g.cursor_y);
+                if (g.board.cells[g.cursor_y][g.cursor_x].revealed) {
+                    board_chord_cell(&g.board, g.cursor_x, g.cursor_y);
+                } else {
+                    bool was_first = g.board.first_move;
+                    board_reveal_cell(&g.board, g.cursor_x, g.cursor_y);
+                    if (was_first && !g.board.first_move)
+                        g.start_time = time(NULL);
+                }
                 break;
             case 'f': case 'F':
-                toggle_flag(&g, g.cursor_x, g.cursor_y);
+                board_toggle_flag(&g.board, g.cursor_x, g.cursor_y);
                 break;
             case 'c': case 'C':
-                chord_cell(&g, g.cursor_x, g.cursor_y);
+                board_chord_cell(&g.board, g.cursor_x, g.cursor_y);
                 break;
             case 'r': case 'R':
                 return AFTER_RESTART;
