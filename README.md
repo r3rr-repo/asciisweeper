@@ -39,7 +39,7 @@ flagging, chording, and a live timer — all in your terminal.
 
 ## Requirements
 
-- A C compiler (`cc`/`gcc`/`clang`)
+- CMake 3.16+ and a C compiler (`cc`/`gcc`/`clang`)
 - `ncurses` development headers
   - macOS: included with Xcode Command Line Tools, or `brew install ncurses`
   - Debian/Ubuntu: `sudo apt install libncurses-dev`
@@ -53,17 +53,12 @@ flagging, chording, and a live timer — all in your terminal.
 ## Build & run
 
 ```sh
-make
-./asciisweeper
+cmake -S . -B build
+cmake --build build
+./build/asciisweeper
 ```
 
-or in one step:
-
-```sh
-make run
-```
-
-`make` also builds `asciisweeper-server`, the multiplayer server binary.
+This also builds `build/asciisweeper-server`, the multiplayer server binary.
 
 ## Controls
 
@@ -101,7 +96,7 @@ mines).
 **Run a server:**
 
 ```sh
-./asciisweeper-server --cert fullchain.pem --key privkey.pem [--port 4443]
+./build/asciisweeper-server --cert fullchain.pem --key privkey.pem [--port 4443]
 ```
 
 The server needs a real TLS certificate and key (e.g. from Let's Encrypt
@@ -121,7 +116,7 @@ certificate; it never falls back to an unverified connection.
 openssl req -x509 -newkey rsa:2048 -keyout server.key -out server.crt \
   -days 1 -nodes -subj "/CN=localhost" \
   -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
-./asciisweeper-server --cert server.crt --key server.key --port 4443
+./build/asciisweeper-server --cert server.crt --key server.key --port 4443
 ```
 
 Then connect a client with host `127.0.0.1`, port `4443`, and `server.crt`
