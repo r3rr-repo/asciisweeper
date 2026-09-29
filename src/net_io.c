@@ -190,6 +190,8 @@ size_t pack_hello(uint8_t *buf, const MsgHello *m)
     Writer w; w_init(&w, buf);
     put_u8(&w, m->protocol_version);
     put_cstr_fixed(&w, m->name, NET_MAX_NAME_LEN);
+    put_u8(&w, m->avatar_skin);
+    put_u8(&w, m->avatar_hair);
     return w.pos;
 }
 bool unpack_hello(const uint8_t *buf, size_t len, MsgHello *out)
@@ -197,6 +199,8 @@ bool unpack_hello(const uint8_t *buf, size_t len, MsgHello *out)
     Reader r; r_init(&r, buf, len);
     if (!get_u8(&r, &out->protocol_version)) return false;
     if (!get_cstr_fixed(&r, out->name, NET_MAX_NAME_LEN)) return false;
+    if (!get_u8(&r, &out->avatar_skin)) return false;
+    if (!get_u8(&r, &out->avatar_hair)) return false;
     return true;
 }
 
@@ -293,6 +297,8 @@ size_t pack_match_start(uint8_t *buf, const MsgMatchStart *m)
     put_u8(&w, m->h);
     put_u16(&w, m->mines);
     put_cstr_fixed(&w, m->opponent_name, NET_MAX_NAME_LEN);
+    put_u8(&w, m->opponent_avatar_skin);
+    put_u8(&w, m->opponent_avatar_hair);
     put_u8(&w, m->your_player_id);
     put_u8(&w, m->first_to_move);
     put_bytes(&w, m->session_token, NET_TOKEN_LEN);
@@ -305,6 +311,8 @@ bool unpack_match_start(const uint8_t *buf, size_t len, MsgMatchStart *out)
     if (!get_u8(&r, &out->h)) return false;
     if (!get_u16(&r, &out->mines)) return false;
     if (!get_cstr_fixed(&r, out->opponent_name, NET_MAX_NAME_LEN)) return false;
+    if (!get_u8(&r, &out->opponent_avatar_skin)) return false;
+    if (!get_u8(&r, &out->opponent_avatar_hair)) return false;
     if (!get_u8(&r, &out->your_player_id)) return false;
     if (!get_u8(&r, &out->first_to_move)) return false;
     if (!get_bytes(&r, out->session_token, NET_TOKEN_LEN)) return false;
@@ -319,6 +327,8 @@ size_t pack_reconnect_ok(uint8_t *buf, const MsgReconnectOk *m)
     put_u8(&w, m->h);
     put_u16(&w, m->mines);
     put_cstr_fixed(&w, m->opponent_name, NET_MAX_NAME_LEN);
+    put_u8(&w, m->opponent_avatar_skin);
+    put_u8(&w, m->opponent_avatar_hair);
     return w.pos;
 }
 bool unpack_reconnect_ok(const uint8_t *buf, size_t len, MsgReconnectOk *out)
@@ -329,6 +339,8 @@ bool unpack_reconnect_ok(const uint8_t *buf, size_t len, MsgReconnectOk *out)
     if (!get_u8(&r, &out->h)) return false;
     if (!get_u16(&r, &out->mines)) return false;
     if (!get_cstr_fixed(&r, out->opponent_name, NET_MAX_NAME_LEN)) return false;
+    if (!get_u8(&r, &out->opponent_avatar_skin)) return false;
+    if (!get_u8(&r, &out->opponent_avatar_hair)) return false;
     return true;
 }
 

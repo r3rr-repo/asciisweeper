@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(asciisweeper VERSION 0.1 LANGUAGES C)
+project(asciisweeper VERSION 0.2 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -14,7 +14,7 @@ find_package(Curses REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
 
-# Version string: "<project version>-<short git commit>", e.g. "0.1-a1b2c3d".
+# Version string: "<project version>-<short git commit>", e.g. "0.2-a1b2c3d".
 # Falls back to "unknown" if git isn't available or this isn't a checkout
 # (e.g. a source tarball with no .git directory).
 find_package(Git QUIET)
@@ -44,7 +44,7 @@ configure_file(src/version.h.in generated/version.h @ONLY)
 
 set(COMMON_SRC src/board.c src/net_io.c)
 
-add_executable(asciisweeper src/main.c src/client_net.c ${COMMON_SRC})
+add_executable(asciisweeper src/main.c src/client_net.c src/avatar.c src/config.c ${COMMON_SRC})
 target_include_directories(asciisweeper PRIVATE ${CURSES_INCLUDE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_link_libraries(asciisweeper PRIVATE ${CURSES_LIBRARIES} OpenSSL::SSL OpenSSL::Crypto)
 

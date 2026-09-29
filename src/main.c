@@ -4,6 +4,7 @@
  */
 
 #include <ncurses.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -16,6 +17,8 @@
 #include "net_io.h"
 #include "client_net.h"
 #include "version.h"
+#include "avatar.h"
+#include "config.h"
 
 typedef struct {
     Board board;
@@ -23,9 +26,10 @@ typedef struct {
     time_t start_time;
     int elapsed;
     int top, left; /* screen origin of the board, for centering */
+    bool side_panels_fit; /* multiplayer: is there room for avatar panels? */
 } Game;
 
-typedef enum { MENU_BEGINNER, MENU_INTERMEDIATE, MENU_EXPERT, MENU_MULTIPLAYER, MENU_CUSTOM, MENU_QUIT } MenuChoice;
+typedef enum { MENU_BEGINNER, MENU_INTERMEDIATE, MENU_EXPERT, MENU_MULTIPLAYER, MENU_AVATAR, MENU_CUSTOM, MENU_QUIT } MenuChoice;
 
 typedef enum { AFTER_RESTART, AFTER_MENU, AFTER_QUIT } AfterGame;
 
@@ -75,7 +79,9 @@ static int color_for_number(int n)
     }
 }
 
-static void game_init(Game *g, int w, int h, int mines)
+#define AVATAR_GUTTER 2
+
+static void game_init(Game *g, int w, int h, int mines, bool want_side_panels)
 {
     memset(g, 0, sizeof(*g));
     board_init(&g->board, w, h, mines);
@@ -85,13 +91,16 @@ static void game_init(Game *g, int w, int h, int mines)
     int scr_h, scr_w;
     getmaxyx(stdscr, scr_h, scr_w);
     int block_h = h + 8;   /* title, blank, hud, border*2, board rows, blank, footer*2 */
-    int block_w = w * 2 + 2;
+    int board_block_w = w * 2 + 2;
+    int panel_extra = 2 * (AVATAR_WIDTH_CHARS + AVATAR_GUTTER);
+    g->side_panels_fit = want_side_panels && (scr_w >= board_block_w + panel_extra);
+    int block_w = board_block_w + (g->side_panels_fit ? panel_extra : 0);
     int origin_y = (scr_h - block_h) / 2;
     int origin_x = (scr_w - block_w) / 2;
     if (origin_y < 0) origin_y = 0;
     if (origin_x < 0) origin_x = 0;
     g->top = origin_y + 4;
-    g->left = origin_x + 1;
+    g->left = origin_x + 1 + (g->side_panels_fit ? (AVATAR_WIDTH_CHARS + AVATAR_GUTTER) : 0);
 }
 
 static void draw_board_frame(Game *g)
@@ -225,7 +234,7 @@ static void render(Game *g)
 static AfterGame play_game(int w, int h, int mines)
 {
     Game g;
-    game_init(&g, w, h, mines);
+    game_init(&g, w, h, mines, false);
     wtimeout(stdscr, 200);
     clear(); /* force a full physical redraw when coming from a differently-shaped screen */
 
@@ -367,8 +376,6 @@ typedef struct {
     char host[128];
     int port;
     char name[NET_MAX_NAME_LEN + 1];
-    char ca_file[256];
-    bool have_ca_file;
 } MPConnectInfo;
 
 /* Multiplayer session state. Reuses Game for the board/cursor/screen-origin
@@ -379,6 +386,8 @@ typedef struct {
     NetConn *nc;
     char my_name[NET_MAX_NAME_LEN + 1];
     char opponent_name[NET_MAX_NAME_LEN + 1];
+    Avatar my_avatar;
+    Avatar opponent_avatar;
     int my_player_id;
     int player_to_move;
     int scores[2];
@@ -438,12 +447,37 @@ static void draw_mp_footer(MPState *mp)
     attroff(COLOR_PAIR(CP_HUD));
 }
 
+static void draw_avatar_panels(MPState *mp)
+{
+    if (!mp->g.side_panels_fit)
+        return;
+
+    int left_avatar_left = mp->g.left - 1 - AVATAR_GUTTER - AVATAR_WIDTH_CHARS;
+    int right_avatar_left = mp->g.left + mp->g.board.w * 2 + 1 + AVATAR_GUTTER;
+    int avatar_top = mp->g.top + (mp->g.board.h - AVATAR_HEIGHT_CHARS) / 2;
+
+    avatar_draw(stdscr, avatar_top, left_avatar_left, &mp->my_avatar);
+    avatar_draw(stdscr, avatar_top, right_avatar_left, &mp->opponent_avatar);
+
+    int name_row = avatar_top + AVATAR_HEIGHT_CHARS + 1;
+    int my_name_col = left_avatar_left + (AVATAR_WIDTH_CHARS - (int)strlen(mp->my_name)) / 2;
+    int opp_name_col = right_avatar_left + (AVATAR_WIDTH_CHARS - (int)strlen(mp->opponent_name)) / 2;
+    if (my_name_col < left_avatar_left) my_name_col = left_avatar_left;
+    if (opp_name_col < right_avatar_left) opp_name_col = right_avatar_left;
+
+    attron(COLOR_PAIR(CP_HUD));
+    mvprintw(name_row, my_name_col, "%s", mp->my_name);
+    mvprintw(name_row, opp_name_col, "%s", mp->opponent_name);
+    attroff(COLOR_PAIR(CP_HUD));
+}
+
 static void render_multiplayer(MPState *mp)
 {
     erase();
     draw_mp_hud(mp);
     draw_board_frame(&mp->g);
     draw_board(&mp->g);
+    draw_avatar_panels(mp);
     draw_mp_footer(mp);
     if (mp->status_line[0]) {
         attron(COLOR_PAIR(CP_HUD) | A_BOLD);
@@ -496,24 +530,32 @@ static AfterGame mp_show_end_screen(MPState *mp, MatchEndReason reason)
     }
 }
 
-static AfterGame play_multiplayer(const char *host, int port, const char *ca_file, const char *name)
+static AfterGame play_multiplayer(const char *host, int port, const char *name, Config *cfg)
 {
     MPState mp;
     memset(&mp, 0, sizeof(mp));
-    game_init(&mp.g, MP_BOARD_W, MP_BOARD_H, MP_MINES);
+    game_init(&mp.g, MP_BOARD_W, MP_BOARD_H, MP_MINES, true);
     strncpy(mp.my_name, name, NET_MAX_NAME_LEN);
+    mp.my_avatar = cfg->avatar;
     strncpy(mp.status_line, "Connecting...", sizeof(mp.status_line) - 1);
     clear();
     wtimeout(stdscr, -1);
     render_multiplayer(&mp);
 
-    mp.nc = net_connect(host, port, ca_file);
+    mp.nc = net_connect(host, port, NULL);
     if (!mp.nc) {
         mp_show_message(&mp, "Could not connect, or the server's certificate could not be verified.");
         return AFTER_MENU;
     }
 
-    MsgHello hello = { .protocol_version = NET_PROTO_VERSION };
+    strncpy(cfg->last_host, host, CONFIG_HOST_LEN - 1);
+    cfg->last_host[CONFIG_HOST_LEN - 1] = '\0';
+    cfg->last_port = port;
+    config_save(cfg);
+
+    MsgHello hello = { .protocol_version = NET_PROTO_VERSION,
+                        .avatar_skin = cfg->avatar.skin_color,
+                        .avatar_hair = cfg->avatar.hair_color };
     strncpy(hello.name, name, NET_MAX_NAME_LEN);
     uint8_t buf[NET_MAX_PAYLOAD];
     size_t n = pack_hello(buf, &hello);
@@ -556,7 +598,7 @@ static AfterGame play_multiplayer(const char *host, int port, const char *ca_fil
                     render_multiplayer(&mp);
                     sleep(3);
 
-                    NetConn *nc2 = net_connect(host, port, ca_file);
+                    NetConn *nc2 = net_connect(host, port, NULL);
                     if (!nc2)
                         continue;
                     net_send_frame(nc2->ssl, MSG_RECONNECT, mp.session_token, NET_TOKEN_LEN);
@@ -566,6 +608,9 @@ static AfterGame play_multiplayer(const char *host, int port, const char *ca_fil
                         if (unpack_reconnect_ok(rf.payload, rf.len, &ok)) {
                             mp.nc = nc2;
                             mp.my_player_id = ok.your_player_id;
+                            strncpy(mp.opponent_name, ok.opponent_name, NET_MAX_NAME_LEN);
+                            mp.opponent_avatar.skin_color = ok.opponent_avatar_skin;
+                            mp.opponent_avatar.hair_color = ok.opponent_avatar_hair;
                             mp.status_line[0] = '\0';
                             recovered = true;
                             continue;
@@ -588,6 +633,8 @@ static AfterGame play_multiplayer(const char *host, int port, const char *ca_fil
                         mp.my_player_id = ms.your_player_id;
                         mp.player_to_move = ms.first_to_move ? ms.your_player_id : (1 - ms.your_player_id);
                         strncpy(mp.opponent_name, ms.opponent_name, NET_MAX_NAME_LEN);
+                        mp.opponent_avatar.skin_color = ms.opponent_avatar_skin;
+                        mp.opponent_avatar.hair_color = ms.opponent_avatar_hair;
                         memcpy(mp.session_token, ms.session_token, NET_TOKEN_LEN);
                         board_init(&mp.g.board, ms.w, ms.h, ms.mines);
                         mp.status_line[0] = '\0';
@@ -686,7 +733,44 @@ static AfterGame play_multiplayer(const char *host, int port, const char *ca_fil
     }
 }
 
-static MenuChoice menu(Difficulty *custom_out, MPConnectInfo *mp_out)
+static void avatar_screen(Config *cfg)
+{
+    wtimeout(stdscr, -1);
+    const char *hint = "[G] Generate new avatar   [Enter/Esc] Save and back";
+
+    while (1) {
+        erase();
+        int scr_h, scr_w;
+        getmaxyx(stdscr, scr_h, scr_w);
+
+        int block_h = AVATAR_HEIGHT_CHARS + 4;
+        int top = (scr_h - block_h) / 2;
+        int left = (scr_w - AVATAR_WIDTH_CHARS) / 2;
+        if (top < 0) top = 0;
+        if (left < 0) left = 0;
+
+        attron(COLOR_PAIR(CP_TITLE) | A_BOLD);
+        mvprintw(top, left + (AVATAR_WIDTH_CHARS - 6) / 2, "AVATAR");
+        attroff(COLOR_PAIR(CP_TITLE) | A_BOLD);
+
+        avatar_draw(stdscr, top + 2, left, &cfg->avatar);
+
+        attron(COLOR_PAIR(CP_HUD));
+        mvprintw(top + block_h - 1, left + (AVATAR_WIDTH_CHARS - (int)strlen(hint)) / 2, "%s", hint);
+        attroff(COLOR_PAIR(CP_HUD));
+        refresh();
+
+        int ch = getch();
+        if (ch == 'g' || ch == 'G') {
+            avatar_random(&cfg->avatar);
+        } else if (ch == '\n' || ch == ' ' || ch == KEY_ENTER || ch == 27 || ch == 'q' || ch == 'Q') {
+            config_save(cfg);
+            return;
+        }
+    }
+}
+
+static MenuChoice menu(Difficulty *custom_out, MPConnectInfo *mp_out, Config *cfg)
 {
     const char *title = "ASCIISWEEPER";
     const char *subtitle = "a terminal minesweeper  -  " ASCIISWEEPER_VERSION;
@@ -695,11 +779,12 @@ static MenuChoice menu(Difficulty *custom_out, MPConnectInfo *mp_out)
         "Intermediate (16x16, 40 mines)",
         "Expert       (30x16, 99 mines)",
         "Multiplayer  (16x16, 40 mines, online)",
+        "Avatar...",
         "Custom...",
         "Quit"
     };
     const char *hint = "Move: up/down or j/k   Select: enter/space   Quit: q";
-    int n = 6;
+    int n = 7;
     int sel = 0;
     wtimeout(stdscr, -1); /* blocking while in menu */
     clear(); /* force a full physical redraw when coming from a differently-shaped screen */
@@ -746,9 +831,15 @@ static MenuChoice menu(Difficulty *custom_out, MPConnectInfo *mp_out)
             case KEY_DOWN: case 'j':
                 sel = (sel + 1) % n;
                 break;
-            case '\n': case ' ': case KEY_ENTER:
-                if (sel == 5) return MENU_QUIT;
-                if (sel == 4) {
+            case '\n': case ' ': case KEY_ENTER: {
+                MenuChoice choice = (MenuChoice)sel;
+                if (choice == MENU_QUIT) return MENU_QUIT;
+                if (choice == MENU_AVATAR) {
+                    avatar_screen(cfg);
+                    clear();
+                    break;
+                }
+                if (choice == MENU_CUSTOM) {
                     int w, h, m;
                     int prow = top + 3 + n + 3;
                     prompt_int("Width",  prow,     left, 5, MAX_W, 16, &w);
@@ -761,21 +852,17 @@ static MenuChoice menu(Difficulty *custom_out, MPConnectInfo *mp_out)
                     custom_out->mines = m;
                     return MENU_CUSTOM;
                 }
-                if (sel == 3) {
+                if (choice == MENU_MULTIPLAYER) {
                     int prow = top + 3 + n + 3;
                     int port;
-                    prompt_str("Server host", prow, left, "localhost", mp_out->host, sizeof(mp_out->host));
-                    prompt_int("Port", prow + 1, left, 1, 65535, 4443, &port);
+                    prompt_str("Server host", prow, left, cfg->last_host, mp_out->host, sizeof(mp_out->host));
+                    prompt_int("Port", prow + 1, left, 1, 65535, cfg->last_port, &port);
                     mp_out->port = port;
                     prompt_str("Your name", prow + 2, left, "Player", mp_out->name, sizeof(mp_out->name));
-                    char ca[256];
-                    prompt_str("CA file (blank = system trust)", prow + 3, left, "", ca, sizeof(ca));
-                    mp_out->have_ca_file = ca[0] != '\0';
-                    if (mp_out->have_ca_file)
-                        strncpy(mp_out->ca_file, ca, sizeof(mp_out->ca_file) - 1);
                     return MENU_MULTIPLAYER;
                 }
-                return (MenuChoice)sel;
+                return choice;
+            }
             case 'q': case 'Q':
                 return MENU_QUIT;
             default:
@@ -794,6 +881,9 @@ int main(int argc, char **argv)
     }
 
     srand((unsigned)time(NULL));
+
+    Config cfg;
+    config_load(&cfg);
 
     initscr();
     if (has_colors())
@@ -815,12 +905,10 @@ int main(int argc, char **argv)
     while (running) {
         Difficulty custom = { 0, 0, 0 };
         MPConnectInfo mpinfo = { .port = 4443 };
-        MenuChoice choice = menu(&custom, &mpinfo);
+        MenuChoice choice = menu(&custom, &mpinfo, &cfg);
 
         if (choice == MENU_MULTIPLAYER) {
-            AfterGame after = play_multiplayer(mpinfo.host, mpinfo.port,
-                                                mpinfo.have_ca_file ? mpinfo.ca_file : NULL,
-                                                mpinfo.name);
+            AfterGame after = play_multiplayer(mpinfo.host, mpinfo.port, mpinfo.name, &cfg);
             if (after == AFTER_QUIT)
                 running = false;
             continue;
