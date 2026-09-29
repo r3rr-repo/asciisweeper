@@ -1,5 +1,6 @@
 #include "net_io.h"
 #include <string.h>
+#include <errno.h>
 
 /* ---- raw framed send/recv ---- */
 
@@ -55,6 +56,35 @@ bool net_recv_frame(SSL *ssl, NetFrame *out)
         return false;
     out->len = len;
     return true;
+}
+
+NetResult net_recv_frame_ex(SSL *ssl, NetFrame *out)
+{
+    uint8_t header[3];
+    int n = SSL_read(ssl, header, 1);
+    if (n == 0)
+        return NET_CLOSED;
+    if (n < 0) {
+        int e = SSL_get_error(ssl, n);
+        if (e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE)
+            return NET_TIMEOUT;
+        if (e == SSL_ERROR_SYSCALL && (errno == EAGAIN || errno == EWOULDBLOCK))
+            return NET_TIMEOUT;
+        return NET_ERROR;
+    }
+
+    /* Got the first byte; a stall from here on is fatal - we can't safely
+     * resume mid-frame after giving up partway through. */
+    if (!ssl_read_all(ssl, header + 1, 2))
+        return NET_ERROR;
+    out->type = header[0];
+    size_t len = ((size_t)header[1] << 8) | (size_t)header[2];
+    if (len > NET_MAX_PAYLOAD)
+        return NET_ERROR;
+    if (len > 0 && !ssl_read_all(ssl, out->payload, len))
+        return NET_ERROR;
+    out->len = len;
+    return NET_OK;
 }
 
 /* ---- byte-cursor helpers for pack/unpack ---- */
