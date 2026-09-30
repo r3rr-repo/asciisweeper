@@ -38,6 +38,7 @@
 #define HELLO_TIMEOUT_SECONDS      10
 #define IDLE_DISCONNECT_SECONDS    90  /* total silence before treating a connection as dead */
 #define RECONNECT_GRACE_SECONDS    60
+#define REMATCH_WAIT_SECONDS       20
 /* Per-IP throttling blunts a single actor flooding the queue with fake
  * players, without punishing two legitimate players who happen to share
  * a NAT/public IP and queue up close together in time - bounding how many
@@ -132,6 +133,11 @@ typedef struct Match {
     uint8_t avatar_skin[2], avatar_hair[2];
     bool active;
     int refcount; /* one per thread still working on this match; freed at 0 */
+
+    bool rematch_wanted[2];
+    int rematch_generation; /* bumped each time a rematch reset happens, so a
+                              * stale "both agreed" from a prior round can't
+                              * be mistaken for a fresh one */
 } Match;
 
 typedef struct {
@@ -585,16 +591,20 @@ static bool wait_for_reconnect(Match *m, int player_index)
 }
 
 /* The main loop once a connection is attached to a match (fresh match
- * start, or after a successful reconnect). Returns when the connection's
- * own socket dies or the match concludes. */
-static void play_match(Connection *conn, Match *m, int player_index)
+ * start, or after a successful reconnect). Returns true if the match
+ * concluded while this connection stayed live the whole time (caller may
+ * then offer a rematch); false if this connection's own socket died -
+ * either handed off to a reconnecting thread (which owns whatever happens
+ * next) or given up on entirely, in which case there's nothing left here
+ * to negotiate a rematch over. */
+static bool play_match(Connection *conn, Match *m, int player_index)
 {
     while (1) {
         pthread_mutex_lock(&m->lock);
         bool still_active = m->active;
         pthread_mutex_unlock(&m->lock);
         if (!still_active)
-            break;
+            return true;
 
         NetFrame frame;
         NetResult r = net_recv_frame_ex(conn->ssl, &frame);
@@ -624,7 +634,7 @@ static void play_match(Connection *conn, Match *m, int player_index)
 
             bool came_back = wait_for_reconnect(m, player_index);
             if (came_back)
-                return; /* the reconnecting thread now owns play_match for this slot */
+                return false; /* the reconnecting thread now owns play_match for this slot */
 
             pthread_mutex_lock(&m->lock);
             bool still_active2 = m->active;
@@ -635,7 +645,7 @@ static void play_match(Connection *conn, Match *m, int player_index)
                 log_line("%s failed to reconnect in time; match ended (no score change)", conn->name);
                 send_match_end(m, END_OPPONENT_LEFT);
             }
-            return;
+            return false;
         }
 
         if (frame.type == MSG_PING) {
@@ -654,6 +664,97 @@ static void play_match(Connection *conn, Match *m, int player_index)
          * drop the connection, to stay forward-compatible with clients
          * that might send additional keepalive-style chatter. */
     }
+}
+
+/* Packs and sends a fresh MSG_MATCH_START for the current state of m to
+ * conn - used both for a brand new match and for a rematch (same session
+ * token: it's still the same Match/slot, just reset for another round). */
+static void send_match_start(Connection *conn, Match *m, int player_index)
+{
+    pthread_mutex_lock(&m->lock);
+    MsgMatchStart ms = { .w = (uint8_t)m->board.w, .h = (uint8_t)m->board.h,
+                          .mines = (uint16_t)m->board.mines,
+                          .opponent_avatar_skin = m->avatar_skin[1 - player_index],
+                          .opponent_avatar_hair = m->avatar_hair[1 - player_index],
+                          .your_player_id = (uint8_t)player_index,
+                          .first_to_move = (m->player_to_move == player_index) ? 1 : 0 };
+    strncpy(ms.opponent_name, m->names[1 - player_index], NET_MAX_NAME_LEN);
+    memcpy(ms.session_token, m->token[player_index], NET_TOKEN_LEN);
+    pthread_mutex_unlock(&m->lock);
+
+    uint8_t buf[NET_MAX_PAYLOAD];
+    size_t n = pack_match_start(buf, &ms);
+    net_send_frame(conn->ssl, MSG_MATCH_START, buf, n);
+}
+
+/* Called after play_match() returns true (the match concluded with this
+ * connection still live). Gives this player up to REMATCH_WAIT_SECONDS to
+ * request a rematch and for the opponent to do the same; the match is
+ * reset in place (same Match/slots/session tokens, fresh board and scores)
+ * the moment both have asked. Returns true if a new round is ready to
+ * play (caller should send a fresh MATCH_START and loop back into
+ * play_match), false if there's no rematch (declined, timed out, or the
+ * opponent isn't connected to ask). */
+static bool try_rematch(Connection *conn, Match *m, int player_index)
+{
+    pthread_mutex_lock(&m->lock);
+    int start_gen = m->rematch_generation;
+    m->rematch_wanted[player_index] = false; /* a fresh ask is needed each round */
+    pthread_mutex_unlock(&m->lock);
+
+    time_t deadline = time(NULL) + REMATCH_WAIT_SECONDS;
+
+    while (time(NULL) < deadline) {
+        bool just_reset = false;
+        char name0[NET_MAX_NAME_LEN + 1], name1[NET_MAX_NAME_LEN + 1];
+
+        pthread_mutex_lock(&m->lock);
+        if (m->rematch_generation == start_gen && m->rematch_wanted[0] && m->rematch_wanted[1]) {
+            /* Both agreed - reset the match in place for another round.
+             * Session tokens are untouched: it's still the same Match and
+             * player slots, so the existing reconnect tokens stay valid. */
+            board_init(&m->board, m->board.w, m->board.h, m->board.mines);
+            m->scores[0] = 0;
+            m->scores[1] = 0;
+            m->player_to_move = 1 - m->player_to_move; /* give the other player first move this time */
+            m->disconnected_at[0] = m->disconnected_at[1] = 0;
+            m->active = true;
+            m->rematch_generation++;
+            just_reset = true;
+            strncpy(name0, m->names[0], NET_MAX_NAME_LEN); name0[NET_MAX_NAME_LEN] = '\0';
+            strncpy(name1, m->names[1], NET_MAX_NAME_LEN); name1[NET_MAX_NAME_LEN] = '\0';
+        }
+        bool advanced = m->rematch_generation > start_gen;
+        bool other_connected = m->connected[1 - player_index];
+        pthread_mutex_unlock(&m->lock);
+
+        if (just_reset)
+            log_line("Rematch starting: %s vs %s", name0, name1);
+        if (advanced)
+            return true;
+        if (!other_connected)
+            return false;
+
+        NetFrame frame;
+        NetResult r = net_recv_frame_ex(conn->ssl, &frame);
+        if (r == NET_TIMEOUT)
+            continue;
+        if (r != NET_OK)
+            return false;
+
+        if (frame.type == MSG_REQUEST_REMATCH) {
+            pthread_mutex_lock(&m->lock);
+            m->rematch_wanted[player_index] = true;
+            pthread_mutex_unlock(&m->lock);
+            continue;
+        }
+        if (frame.type == MSG_PING) {
+            net_send_frame(conn->ssl, MSG_PONG, NULL, 0);
+            continue;
+        }
+        /* ignore anything else (e.g. a stray chat line) while deciding */
+    }
+    return false;
 }
 
 /* ---------------- connection lifecycle ---------------- */
@@ -733,7 +834,12 @@ static void handle_connection(Connection *conn)
         }
 
         send_board_state_to(conn, m);
-        play_match(conn, m, player_index);
+        while (play_match(conn, m, player_index)) {
+            if (!try_rematch(conn, m, player_index))
+                break;
+            send_match_start(conn, m, player_index);
+            send_board_state_to(conn, m);
+        }
         match_release(m);
         return;
     }
@@ -783,21 +889,16 @@ static void handle_connection(Connection *conn)
             int pidx = conn->assigned_player_index;
             pthread_mutex_unlock(&conn->state_lock);
             if (m) {
-                MsgMatchStart ms = { .w = (uint8_t)m->board.w, .h = (uint8_t)m->board.h,
-                                      .mines = (uint16_t)m->board.mines,
-                                      .opponent_avatar_skin = m->avatar_skin[1 - pidx],
-                                      .opponent_avatar_hair = m->avatar_hair[1 - pidx],
-                                      .your_player_id = (uint8_t)pidx,
-                                      .first_to_move = (m->player_to_move == pidx) ? 1 : 0 };
-                strncpy(ms.opponent_name, m->names[1 - pidx], NET_MAX_NAME_LEN);
-                memcpy(ms.session_token, m->token[pidx], NET_TOKEN_LEN);
-                uint8_t buf[NET_MAX_PAYLOAD];
-                size_t n = pack_match_start(buf, &ms);
-                net_send_frame(conn->ssl, MSG_MATCH_START, buf, n);
+                send_match_start(conn, m, pidx);
 
                 rate_release(conn->ip);
                 send_board_state_to(conn, m);
-                play_match(conn, m, pidx);
+                while (play_match(conn, m, pidx)) {
+                    if (!try_rematch(conn, m, pidx))
+                        break;
+                    send_match_start(conn, m, pidx);
+                    send_board_state_to(conn, m);
+                }
                 match_release(m);
                 return;
             }
@@ -823,21 +924,16 @@ static void handle_connection(Connection *conn)
         int pidx = conn->assigned_player_index;
         pthread_mutex_unlock(&conn->state_lock);
 
-        MsgMatchStart ms = { .w = (uint8_t)m->board.w, .h = (uint8_t)m->board.h,
-                              .mines = (uint16_t)m->board.mines,
-                              .opponent_avatar_skin = m->avatar_skin[1 - pidx],
-                              .opponent_avatar_hair = m->avatar_hair[1 - pidx],
-                              .your_player_id = (uint8_t)pidx,
-                              .first_to_move = (m->player_to_move == pidx) ? 1 : 0 };
-        strncpy(ms.opponent_name, m->names[1 - pidx], NET_MAX_NAME_LEN);
-        memcpy(ms.session_token, m->token[pidx], NET_TOKEN_LEN);
-        uint8_t buf[NET_MAX_PAYLOAD];
-        size_t n = pack_match_start(buf, &ms);
-        net_send_frame(conn->ssl, MSG_MATCH_START, buf, n);
+        send_match_start(conn, m, pidx);
 
         rate_release(conn->ip);
         send_board_state_to(conn, m);
-        play_match(conn, m, pidx);
+        while (play_match(conn, m, pidx)) {
+            if (!try_rematch(conn, m, pidx))
+                break;
+            send_match_start(conn, m, pidx);
+            send_board_state_to(conn, m);
+        }
         match_release(m);
     }
 }
