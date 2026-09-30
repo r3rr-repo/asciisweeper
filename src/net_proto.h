@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include "board.h"
 
-#define NET_PROTO_VERSION   3
+#define NET_PROTO_VERSION   4
 #define NET_MAX_PAYLOAD     8192
 #define NET_MAX_NAME_LEN    16
 #define NET_TOKEN_LEN       16
@@ -26,6 +26,7 @@ typedef enum {
     MSG_ACTION_CHORD   = 0x05,
     MSG_PING           = 0x06,
     MSG_CHAT           = 0x07,
+    MSG_REQUEST_REMATCH = 0x08,
 
     /* server -> client */
     MSG_WELCOME         = 0x81,

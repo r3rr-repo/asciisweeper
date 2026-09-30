@@ -541,9 +541,18 @@ static void mp_show_message(MPState *mp, const char *msg)
     getch();
 }
 
-static AfterGame mp_show_end_screen(MPState *mp, MatchEndReason reason)
+/* Shows the post-match screen. If the opponent is still connected, offers
+ * a rematch: pressing R asks the server, and if the opponent does too
+ * within its wait window, a fresh MSG_MATCH_START arrives and *out_rematch
+ * is set true (the returned AfterGame is then meaningless - the caller
+ * should loop back into the match instead of returning it). */
+static AfterGame mp_show_end_screen(MPState *mp, MatchEndReason reason, bool *out_rematch)
 {
     wtimeout(stdscr, -1);
+    *out_rematch = false;
+    bool rematch_requested = false;
+    bool can_rematch = (reason != END_OPPONENT_LEFT);
+
     while (1) {
         render_multiplayer(mp);
 
@@ -565,13 +574,66 @@ static AfterGame mp_show_end_screen(MPState *mp, MatchEndReason reason)
         mvprintw(mp->g.top + mp->g.board.h + 5, mp->g.left, "%s", msg);
         attroff(COLOR_PAIR(color) | A_BOLD);
         attron(COLOR_PAIR(CP_HUD));
-        mvprintw(mp->g.top + mp->g.board.h + 6, mp->g.left, "[N]ew match  [Q]uit");
+        if (!can_rematch)
+            mvprintw(mp->g.top + mp->g.board.h + 6, mp->g.left, "[N]ew match  [Q]uit");
+        else if (rematch_requested)
+            mvprintw(mp->g.top + mp->g.board.h + 6, mp->g.left, "Waiting for opponent to accept a rematch...  [Q]uit");
+        else
+            mvprintw(mp->g.top + mp->g.board.h + 6, mp->g.left, "[R]ematch  [N]ew match  [Q]uit");
         attroff(COLOR_PAIR(CP_HUD));
         refresh();
 
-        int ch = getch();
-        if (ch == 'n' || ch == 'N') { net_close(mp->nc); return AFTER_MENU; }
-        if (ch == 'q' || ch == 'Q') { net_close(mp->nc); return AFTER_QUIT; }
+        int term_fd = STDIN_FILENO;
+        int sock_fd = net_get_fd(mp->nc);
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(term_fd, &rfds);
+        FD_SET(sock_fd, &rfds);
+        int maxfd = sock_fd > term_fd ? sock_fd : term_fd;
+        struct timeval tv = { 1, 0 };
+        int r = select(maxfd + 1, &rfds, NULL, NULL, &tv);
+        if (r < 0)
+            continue;
+
+        if (r > 0 && FD_ISSET(sock_fd, &rfds)) {
+            NetFrame frame;
+            if (!net_recv_frame(mp->nc->ssl, &frame)) {
+                net_close(mp->nc);
+                mp->nc = NULL;
+                mp_show_message(mp, rematch_requested ? "Rematch not available - opponent left."
+                                                       : "Connection closed.");
+                return AFTER_MENU;
+            }
+            if (frame.type == MSG_MATCH_START) {
+                MsgMatchStart ms;
+                if (unpack_match_start(frame.payload, frame.len, &ms)) {
+                    mp->my_player_id = ms.your_player_id;
+                    mp->player_to_move = ms.first_to_move ? ms.your_player_id : (1 - ms.your_player_id);
+                    strncpy(mp->opponent_name, ms.opponent_name, NET_MAX_NAME_LEN);
+                    mp->opponent_avatar.skin_color = ms.opponent_avatar_skin;
+                    mp->opponent_avatar.hair_color = ms.opponent_avatar_hair;
+                    memcpy(mp->session_token, ms.session_token, NET_TOKEN_LEN);
+                    board_init(&mp->g.board, ms.w, ms.h, ms.mines);
+                    mp->scores[0] = mp->scores[1] = 0;
+                    mp->status_line[0] = '\0';
+                    *out_rematch = true;
+                    return AFTER_MENU; /* ignored by the caller when *out_rematch is true */
+                }
+            }
+            /* ignore anything else (e.g. a stray chat line) on this screen */
+        }
+
+        if (r > 0 && FD_ISSET(term_fd, &rfds)) {
+            int ch = getch();
+            if (ch == 'q' || ch == 'Q') { net_close(mp->nc); return AFTER_QUIT; }
+            if (can_rematch && !rematch_requested && (ch == 'r' || ch == 'R')) {
+                net_send_frame(mp->nc->ssl, MSG_REQUEST_REMATCH, NULL, 0);
+                rematch_requested = true;
+            } else if (ch == 'n' || ch == 'N') {
+                net_close(mp->nc);
+                return AFTER_MENU;
+            }
+        }
     }
 }
 
@@ -721,7 +783,13 @@ static AfterGame play_multiplayer(const char *host, int port, const char *name, 
                     if (unpack_match_end(frame.payload, frame.len, &me)) {
                         mp.scores[0] = me.scores[0];
                         mp.scores[1] = me.scores[1];
-                        return mp_show_end_screen(&mp, (MatchEndReason)me.reason);
+                        bool rematch = false;
+                        AfterGame after = mp_show_end_screen(&mp, (MatchEndReason)me.reason, &rematch);
+                        if (rematch) {
+                            mp.status_line[0] = '\0';
+                            continue;
+                        }
+                        return after;
                     }
                     break;
                 }
