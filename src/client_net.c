@@ -51,6 +51,23 @@ NetConn *net_connect(const char *host, int port, const char *ca_file)
         return NULL;
     }
 
+    if (!ca_file) {
+        /* On some systems the OpenSSL library's compiled-in default trust
+         * directory is empty even though SSL_CTX_set_default_verify_paths()
+         * above reports success - notably FreeBSD's package OpenSSL, whose
+         * baked-in OPENSSLDIR ships with no certificates, while the actual
+         * CA bundle (from ca_root_nss) lives at /usr/local/etc/ssl/cert.pem.
+         * Load known extra bundle locations too, best-effort: a missing
+         * file here just means this particular fallback doesn't apply. */
+        static const char *extra_bundles[] = {
+            "/usr/local/etc/ssl/cert.pem", /* FreeBSD (ports OpenSSL + ca_root_nss) */
+            "/etc/ssl/cert.pem",           /* OpenBSD */
+            NULL,
+        };
+        for (int i = 0; extra_bundles[i]; i++)
+            SSL_CTX_load_verify_locations(ctx, extra_bundles[i], NULL);
+    }
+
     SSL *ssl = SSL_new(ctx);
     SSL_set_fd(ssl, fd);
     if (host_is_ip_literal(host)) {
