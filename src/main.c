@@ -465,6 +465,24 @@ static void draw_mp_footer(MPState *mp)
     attroff(COLOR_PAIR(CP_HUD));
 }
 
+#define AVATAR_BLINK_CYCLE_SECONDS    4
+#define AVATAR_BLINK_DURATION_SECONDS 1
+
+/* Deterministic pseudo-random blink timing, derived purely from wall-clock
+ * time so it needs no persistent per-avatar state: each
+ * AVATAR_BLINK_CYCLE_SECONDS-long window gets a hashed, pseudo-random
+ * AVATAR_BLINK_DURATION_SECONDS-long sub-interval where the eyes are
+ * closed. `salt` differentiates avatars so they don't blink in lockstep. */
+static bool blink_closed(int salt)
+{
+    time_t now = time(NULL);
+    long cycle = now / AVATAR_BLINK_CYCLE_SECONDS;
+    long offset = now % AVATAR_BLINK_CYCLE_SECONDS;
+    unsigned h = (unsigned)cycle * 2654435761u ^ (unsigned)salt * 0x9E3779B1u;
+    long blink_start = h % (AVATAR_BLINK_CYCLE_SECONDS - AVATAR_BLINK_DURATION_SECONDS + 1);
+    return offset >= blink_start && offset < blink_start + AVATAR_BLINK_DURATION_SECONDS;
+}
+
 static void draw_avatar_panels(MPState *mp)
 {
     if (!mp->g.side_panels_fit)
@@ -474,16 +492,13 @@ static void draw_avatar_panels(MPState *mp)
     int right_avatar_left = mp->g.left + mp->g.board.w * 2 + 1 + AVATAR_GUTTER;
     int avatar_top = mp->g.top + (mp->g.board.h - AVATAR_HEIGHT_CHARS) / 2;
 
-    /* Slowly blink the eyes of whichever avatar belongs to the player
-     * currently waiting on the other one to move - a real ~1s-open/~1s-
-     * closed cadence driven by wall-clock time, stable regardless of how
-     * often we happen to render. */
-    bool blink_on = (time(NULL) % 2) == 0;
     bool waiting_for_me = mp->matched && (mp->player_to_move != mp->my_player_id);
     bool waiting_for_opponent = mp->matched && (mp->player_to_move == mp->my_player_id);
 
-    avatar_draw(stdscr, avatar_top, left_avatar_left, &mp->my_avatar, !waiting_for_me || blink_on);
-    avatar_draw(stdscr, avatar_top, right_avatar_left, &mp->opponent_avatar, !waiting_for_opponent || blink_on);
+    avatar_draw(stdscr, avatar_top, left_avatar_left, &mp->my_avatar,
+                !waiting_for_me || !blink_closed(0));
+    avatar_draw(stdscr, avatar_top, right_avatar_left, &mp->opponent_avatar,
+                !waiting_for_opponent || !blink_closed(1));
 
     int name_row = avatar_top + AVATAR_HEIGHT_CHARS + 1;
     int my_name_col = left_avatar_left + (AVATAR_WIDTH_CHARS - (int)strlen(mp->my_name)) / 2;
