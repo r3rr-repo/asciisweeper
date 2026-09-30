@@ -2,6 +2,7 @@
 #define ASCIISWEEPER_AVATAR_H
 
 #include <stdint.h>
+#include <stdbool.h>
 #include <ncurses.h>
 
 /* A player avatar is just two small color indices (0-7, the 8 base
@@ -25,7 +26,9 @@ void avatar_random(Avatar *out);
 
 /* Draws the avatar at (top, left) in the given window (pass stdscr for the
  * main screen). Uses the same COLOR_PAIR-per-cell approach as draw_board;
- * must be called after setup_colors()/start_color(). */
-void avatar_draw(WINDOW *win, int top, int left, const Avatar *a);
+ * must be called after setup_colors()/start_color(). When eyes_open is
+ * false, the eye pixels render in the skin color instead (a blink) rather
+ * than the whole avatar disappearing. */
+void avatar_draw(WINDOW *win, int top, int left, const Avatar *a, bool eyes_open);
 
 #endif
