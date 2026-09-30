@@ -25,6 +25,7 @@ static void set_defaults(Config *cfg)
     cfg->last_port = 4443;
     strncpy(cfg->last_name, "Player", NET_MAX_NAME_LEN);
     cfg->last_name[NET_MAX_NAME_LEN] = '\0';
+    cfg->last_ca_file[0] = '\0';
 }
 
 void config_load(Config *cfg)
@@ -52,6 +53,7 @@ void config_load(Config *cfg)
         else if (strcmp(key, "last_host") == 0) { strncpy(cfg->last_host, value, CONFIG_HOST_LEN - 1); cfg->last_host[CONFIG_HOST_LEN - 1] = '\0'; }
         else if (strcmp(key, "last_port") == 0) { cfg->last_port = atoi(value); }
         else if (strcmp(key, "last_name") == 0) { strncpy(cfg->last_name, value, NET_MAX_NAME_LEN); cfg->last_name[NET_MAX_NAME_LEN] = '\0'; }
+        else if (strcmp(key, "last_ca_file") == 0) { strncpy(cfg->last_ca_file, value, CONFIG_CA_FILE_LEN - 1); cfg->last_ca_file[CONFIG_CA_FILE_LEN - 1] = '\0'; }
     }
     fclose(f);
 
@@ -93,5 +95,6 @@ void config_save(const Config *cfg)
     fprintf(f, "last_host=%s\n", cfg->last_host);
     fprintf(f, "last_port=%d\n", cfg->last_port);
     fprintf(f, "last_name=%s\n", cfg->last_name);
+    fprintf(f, "last_ca_file=%s\n", cfg->last_ca_file);
     fclose(f);
 }

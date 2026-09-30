@@ -376,6 +376,7 @@ typedef struct {
     char host[128];
     int port;
     char name[NET_MAX_NAME_LEN + 1];
+    char ca_file[CONFIG_CA_FILE_LEN];
 } MPConnectInfo;
 
 #define CHAT_LOG_LINES 3
@@ -664,8 +665,10 @@ static AfterGame mp_show_end_screen(MPState *mp, MatchEndReason reason, bool *ou
     }
 }
 
-static AfterGame play_multiplayer(const char *host, int port, const char *name, Config *cfg)
+static AfterGame play_multiplayer(const char *host, int port, const char *name, const char *ca_file, Config *cfg)
 {
+    const char *ca = (ca_file && ca_file[0]) ? ca_file : NULL;
+
     MPState mp;
     memset(&mp, 0, sizeof(mp));
     game_init(&mp.g, MP_BOARD_W, MP_BOARD_H, MP_MINES, true);
@@ -676,7 +679,7 @@ static AfterGame play_multiplayer(const char *host, int port, const char *name, 
     wtimeout(stdscr, -1);
     render_multiplayer(&mp);
 
-    mp.nc = net_connect(host, port, NULL);
+    mp.nc = net_connect(host, port, ca);
     if (!mp.nc) {
         mp_show_message(&mp, "Could not connect, or the server's certificate could not be verified.");
         return AFTER_MENU;
@@ -687,6 +690,8 @@ static AfterGame play_multiplayer(const char *host, int port, const char *name, 
     cfg->last_port = port;
     strncpy(cfg->last_name, name, NET_MAX_NAME_LEN);
     cfg->last_name[NET_MAX_NAME_LEN] = '\0';
+    strncpy(cfg->last_ca_file, ca_file ? ca_file : "", CONFIG_CA_FILE_LEN - 1);
+    cfg->last_ca_file[CONFIG_CA_FILE_LEN - 1] = '\0';
     config_save(cfg);
 
     MsgHello hello = { .protocol_version = NET_PROTO_VERSION,
@@ -734,7 +739,7 @@ static AfterGame play_multiplayer(const char *host, int port, const char *name, 
                     render_multiplayer(&mp);
                     sleep(3);
 
-                    NetConn *nc2 = net_connect(host, port, NULL);
+                    NetConn *nc2 = net_connect(host, port, ca);
                     if (!nc2)
                         continue;
                     net_send_frame(nc2->ssl, MSG_RECONNECT, mp.session_token, NET_TOKEN_LEN);
@@ -1041,6 +1046,8 @@ static MenuChoice menu(Difficulty *custom_out, MPConnectInfo *mp_out, Config *cf
                     prompt_int("Port", prow + 1, left, 1, 65535, cfg->last_port, &port);
                     mp_out->port = port;
                     prompt_str("Your name", prow + 2, left, cfg->last_name, mp_out->name, sizeof(mp_out->name));
+                    prompt_str("CA file (blank = system trust store)", prow + 3, left,
+                               cfg->last_ca_file, mp_out->ca_file, sizeof(mp_out->ca_file));
                     return MENU_MULTIPLAYER;
                 }
                 return choice;
@@ -1090,7 +1097,7 @@ int main(int argc, char **argv)
         MenuChoice choice = menu(&custom, &mpinfo, &cfg);
 
         if (choice == MENU_MULTIPLAYER) {
-            AfterGame after = play_multiplayer(mpinfo.host, mpinfo.port, mpinfo.name, &cfg);
+            AfterGame after = play_multiplayer(mpinfo.host, mpinfo.port, mpinfo.name, mpinfo.ca_file, &cfg);
             if (after == AFTER_QUIT)
                 running = false;
             continue;
