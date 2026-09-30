@@ -14,14 +14,21 @@
  * colors. */
 #define AVATAR_EYE_COLOR COLOR_BLACK
 
+/* Separate pair range for a closed (blinking) eye: eye-colored dash drawn
+ * on a skin-colored background, i.e. the inverse of AVATAR_PAIR_BASE's
+ * skin-colored-background/white-foreground pairs. */
+#define AVATAR_BLINK_PAIR_BASE 120
+
 static bool g_avatar_colors_ready = false;
 
 static void ensure_avatar_colors(void)
 {
     if (g_avatar_colors_ready)
         return;
-    for (int c = 0; c <= 7; c++)
+    for (int c = 0; c <= 7; c++) {
         init_pair((short)(AVATAR_PAIR_BASE + c), COLOR_WHITE, c);
+        init_pair((short)(AVATAR_BLINK_PAIR_BASE + c), AVATAR_EYE_COLOR, c);
+    }
     g_avatar_colors_ready = true;
 }
 
@@ -41,10 +48,14 @@ void avatar_draw(WINDOW *win, int top, int left, const Avatar *a, bool eyes_open
         for (int col = 0; col < AVATAR_COLS; col++) {
             bool is_hair = row < 2;
             bool is_eye = !is_hair && row == 2 && (col == 2 || col == 4);
-            int color = is_eye ? AVATAR_EYE_COLOR : (is_hair ? a->hair_color : a->skin_color);
-            chtype ch = (is_eye && !eyes_open) ? '-' : ' ';
+            bool blinking_eye = is_eye && !eyes_open;
+            chtype ch = blinking_eye ? '-' : ' ';
 
-            int attrs = COLOR_PAIR(AVATAR_PAIR_BASE + color);
+            int attrs;
+            if (blinking_eye)
+                attrs = COLOR_PAIR(AVATAR_BLINK_PAIR_BASE + a->skin_color);
+            else
+                attrs = COLOR_PAIR(AVATAR_PAIR_BASE + (is_eye ? AVATAR_EYE_COLOR : (is_hair ? a->hair_color : a->skin_color)));
             wattron(win, attrs);
             mvwaddch(win, top + row, left + col * 2, ch);
             mvwaddch(win, top + row, left + col * 2 + 1, ch);
