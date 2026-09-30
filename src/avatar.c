@@ -40,13 +40,14 @@ void avatar_draw(WINDOW *win, int top, int left, const Avatar *a, bool eyes_open
     for (int row = 0; row < AVATAR_ROWS; row++) {
         for (int col = 0; col < AVATAR_COLS; col++) {
             bool is_hair = row < 2;
-            bool is_eye = !is_hair && row == 2 && (col == 2 || col == 4) && eyes_open;
+            bool is_eye = !is_hair && row == 2 && (col == 2 || col == 4);
             int color = is_eye ? AVATAR_EYE_COLOR : (is_hair ? a->hair_color : a->skin_color);
+            chtype ch = (is_eye && !eyes_open) ? '-' : ' ';
 
             int attrs = COLOR_PAIR(AVATAR_PAIR_BASE + color);
             wattron(win, attrs);
-            mvwaddch(win, top + row, left + col * 2, ' ');
-            mvwaddch(win, top + row, left + col * 2 + 1, ' ');
+            mvwaddch(win, top + row, left + col * 2, ch);
+            mvwaddch(win, top + row, left + col * 2 + 1, ch);
             wattroff(win, attrs);
         }
     }

@@ -27,8 +27,9 @@ void avatar_random(Avatar *out);
 /* Draws the avatar at (top, left) in the given window (pass stdscr for the
  * main screen). Uses the same COLOR_PAIR-per-cell approach as draw_board;
  * must be called after setup_colors()/start_color(). When eyes_open is
- * false, the eye pixels render in the skin color instead (a blink) rather
- * than the whole avatar disappearing. */
+ * false, the eye pixels render as a dash ('-') instead of a blank block -
+ * a closed-eye blink - while staying the same dark eye color throughout,
+ * so the eyes never disappear or blend into the face. */
 void avatar_draw(WINDOW *win, int top, int left, const Avatar *a, bool eyes_open);
 
 #endif
