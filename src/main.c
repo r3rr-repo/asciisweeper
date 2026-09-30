@@ -390,6 +390,7 @@ typedef struct {
     char opponent_name[NET_MAX_NAME_LEN + 1];
     Avatar my_avatar;
     Avatar opponent_avatar;
+    bool matched; /* true once actually in a match (vs. still queued) */
     int my_player_id;
     int player_to_move;
     int scores[2];
@@ -473,8 +474,16 @@ static void draw_avatar_panels(MPState *mp)
     int right_avatar_left = mp->g.left + mp->g.board.w * 2 + 1 + AVATAR_GUTTER;
     int avatar_top = mp->g.top + (mp->g.board.h - AVATAR_HEIGHT_CHARS) / 2;
 
-    avatar_draw(stdscr, avatar_top, left_avatar_left, &mp->my_avatar);
-    avatar_draw(stdscr, avatar_top, right_avatar_left, &mp->opponent_avatar);
+    /* Slowly blink the eyes of whichever avatar belongs to the player
+     * currently waiting on the other one to move - a real ~1s-open/~1s-
+     * closed cadence driven by wall-clock time, stable regardless of how
+     * often we happen to render. */
+    bool blink_on = (time(NULL) % 2) == 0;
+    bool waiting_for_me = mp->matched && (mp->player_to_move != mp->my_player_id);
+    bool waiting_for_opponent = mp->matched && (mp->player_to_move == mp->my_player_id);
+
+    avatar_draw(stdscr, avatar_top, left_avatar_left, &mp->my_avatar, !waiting_for_me || blink_on);
+    avatar_draw(stdscr, avatar_top, right_avatar_left, &mp->opponent_avatar, !waiting_for_opponent || blink_on);
 
     int name_row = avatar_top + AVATAR_HEIGHT_CHARS + 1;
     int my_name_col = left_avatar_left + (AVATAR_WIDTH_CHARS - (int)strlen(mp->my_name)) / 2;
@@ -500,8 +509,10 @@ static void draw_chat(MPState *mp)
     attron(COLOR_PAIR(CP_HUD));
     for (int i = 0; i < mp->chat_log_count; i++) {
         int idx = (start + i) % CHAT_LOG_LINES;
-        if (row + i < scr_h)
+        if (row + i < scr_h) {
             mvprintw(row + i, mp->g.left, "%s", mp->chat_log[idx]);
+            clrtoeol();
+        }
     }
     attroff(COLOR_PAIR(CP_HUD));
 
@@ -573,6 +584,7 @@ static AfterGame mp_show_end_screen(MPState *mp, MatchEndReason reason, bool *ou
         attron(COLOR_PAIR(color) | A_BOLD);
         mvprintw(mp->g.top + mp->g.board.h + 5, mp->g.left, "%s", msg);
         attroff(COLOR_PAIR(color) | A_BOLD);
+        clrtoeol();
         attron(COLOR_PAIR(CP_HUD));
         if (!can_rematch)
             mvprintw(mp->g.top + mp->g.board.h + 6, mp->g.left, "[N]ew match  [Q]uit");
@@ -739,6 +751,7 @@ static AfterGame play_multiplayer(const char *host, int port, const char *name, 
                     MsgMatchStart ms;
                     if (unpack_match_start(frame.payload, frame.len, &ms)) {
                         matched = true;
+                        mp.matched = true;
                         mp.my_player_id = ms.your_player_id;
                         mp.player_to_move = ms.first_to_move ? ms.your_player_id : (1 - ms.your_player_id);
                         strncpy(mp.opponent_name, ms.opponent_name, NET_MAX_NAME_LEN);
@@ -907,7 +920,7 @@ static void avatar_screen(Config *cfg)
         mvprintw(top, left + (AVATAR_WIDTH_CHARS - 6) / 2, "AVATAR");
         attroff(COLOR_PAIR(CP_TITLE) | A_BOLD);
 
-        avatar_draw(stdscr, top + 2, left, &cfg->avatar);
+        avatar_draw(stdscr, top + 2, left, &cfg->avatar, true);
 
         attron(COLOR_PAIR(CP_HUD));
         mvprintw(top + block_h - 1, left + (AVATAR_WIDTH_CHARS - (int)strlen(hint)) / 2, "%s", hint);
