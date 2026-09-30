@@ -466,22 +466,78 @@ static void draw_mp_footer(MPState *mp)
     attroff(COLOR_PAIR(CP_HUD));
 }
 
-#define AVATAR_BLINK_CYCLE_SECONDS    4
-#define AVATAR_BLINK_DURATION_SECONDS 1
+#define AVATAR_BLINK_FRAME_MS    120  /* how long each of the two quick blinks stays closed */
+#define AVATAR_BLINK_GAP_MS       90  /* eyes-open gap between the two blinks of a double-blink */
+#define AVATAR_BLINK_MIN_GAP_MS 2000  /* shortest wait before the next double-blink */
+#define AVATAR_BLINK_MAX_GAP_MS 8000  /* longest wait before the next double-blink */
 
-/* Deterministic pseudo-random blink timing, derived purely from wall-clock
- * time so it needs no persistent per-avatar state: each
- * AVATAR_BLINK_CYCLE_SECONDS-long window gets a hashed, pseudo-random
- * AVATAR_BLINK_DURATION_SECONDS-long sub-interval where the eyes are
- * closed. `salt` differentiates avatars so they don't blink in lockstep. */
-static bool blink_closed(int salt)
+typedef enum { BLINK_IDLE, BLINK_CLOSED1, BLINK_GAP, BLINK_CLOSED2 } BlinkPhase;
+
+typedef struct {
+    bool initialized;
+    BlinkPhase phase;
+    long next_event_ms; /* monotonic ms of the next double-blink's start, while idle */
+    long phase_end_ms;  /* monotonic ms the current sub-phase ends, while not idle */
+} BlinkState;
+
+static long monotonic_ms(void)
 {
-    time_t now = time(NULL);
-    long cycle = now / AVATAR_BLINK_CYCLE_SECONDS;
-    long offset = now % AVATAR_BLINK_CYCLE_SECONDS;
-    unsigned h = (unsigned)cycle * 2654435761u ^ (unsigned)salt * 0x9E3779B1u;
-    long blink_start = h % (AVATAR_BLINK_CYCLE_SECONDS - AVATAR_BLINK_DURATION_SECONDS + 1);
-    return offset >= blink_start && offset < blink_start + AVATAR_BLINK_DURATION_SECONDS;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static long random_blink_gap_ms(void)
+{
+    return AVATAR_BLINK_MIN_GAP_MS + rand() % (AVATAR_BLINK_MAX_GAP_MS - AVATAR_BLINK_MIN_GAP_MS + 1);
+}
+
+/* Steps a per-avatar quick-double-blink state machine and reports whether
+ * the eyes should be closed right now. `idx` (0 = mine, 1 = opponent's)
+ * selects which avatar's independent schedule to advance, so the two
+ * avatars don't blink in lockstep. Only advances while actually called
+ * (i.e. while that avatar is the one being animated), which is fine since
+ * a non-animated avatar's eyes just stay open regardless. */
+static bool blink_closed(int idx)
+{
+    static BlinkState states[2];
+    BlinkState *s = &states[idx];
+    long now = monotonic_ms();
+
+    if (!s->initialized) {
+        s->initialized = true;
+        s->phase = BLINK_IDLE;
+        s->next_event_ms = now + random_blink_gap_ms();
+    }
+
+    switch (s->phase) {
+        case BLINK_IDLE:
+            if (now >= s->next_event_ms) {
+                s->phase = BLINK_CLOSED1;
+                s->phase_end_ms = now + AVATAR_BLINK_FRAME_MS;
+            }
+            break;
+        case BLINK_CLOSED1:
+            if (now >= s->phase_end_ms) {
+                s->phase = BLINK_GAP;
+                s->phase_end_ms = now + AVATAR_BLINK_GAP_MS;
+            }
+            break;
+        case BLINK_GAP:
+            if (now >= s->phase_end_ms) {
+                s->phase = BLINK_CLOSED2;
+                s->phase_end_ms = now + AVATAR_BLINK_FRAME_MS;
+            }
+            break;
+        case BLINK_CLOSED2:
+            if (now >= s->phase_end_ms) {
+                s->phase = BLINK_IDLE;
+                s->next_event_ms = now + random_blink_gap_ms();
+            }
+            break;
+    }
+
+    return s->phase == BLINK_CLOSED1 || s->phase == BLINK_CLOSED2;
 }
 
 static void draw_avatar_panels(MPState *mp)
@@ -715,7 +771,9 @@ static AfterGame play_multiplayer(const char *host, int port, const char *name, 
         FD_SET(term_fd, &rfds);
         FD_SET(sock_fd, &rfds);
         int maxfd = sock_fd > term_fd ? sock_fd : term_fd;
-        struct timeval tv = { 1, 0 };
+        /* Short enough to redraw mid-blink for the quick double-blink
+         * animation, rather than only once per second. */
+        struct timeval tv = { 0, 100000 };
         int r = select(maxfd + 1, &rfds, NULL, NULL, &tv);
         if (r < 0)
             continue;
