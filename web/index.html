@@ -30,6 +30,47 @@
     <canvas id="screen" tabindex="0"></canvas>
     <input id="ime" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-hidden="true" />
     <div id="boot">loading&hellip;</div>
-    <script type="module" src="/src/main.ts"></script>
+    <script>
+      /*
+       * Boot guard. Without this, anything that stops main.ts from running - the
+       * wrong directory served, a missing wasm file, a blocked MIME type - leaves
+       * the page sitting on "loading..." with only a console error to go on.
+       *
+       * The commonest mistake is serving the SOURCE tree: browsers cannot execute
+       * TypeScript, so web/ has to go through the dev server, and only web/dist/
+       * is servable as plain static files. We can detect that precisely, because
+       * on the source page this script's sibling still has a .ts extension.
+       */
+      (function () {
+        var el = document.getElementById("boot");
+        var entry = document.querySelector('script[type=module][src]');
+        var isSource = !!entry && /\.ts(\?|$)/.test(entry.getAttribute("src") || "");
+        function diagnose(detail) {
+          if (!el || window.__asciisweeperBooted) return;
+          el.style.whiteSpace = "pre-wrap";
+          el.style.textAlign = "left";
+          el.style.padding = "0 16px";
+          el.textContent = isSource
+            ? "asciisweeper did not start.\n\n"
+              + "This is the source page, and browsers cannot run TypeScript directly.\n"
+              + "Use one of:\n\n"
+              + "  ./build-web.sh --serve     dev server\n"
+              + "  ./build-web.sh             then serve or copy web/dist/\n\n"
+              + "Serving web/ as static files cannot work; web/dist/ is the built output."
+            : "asciisweeper did not start.\n\n" + (detail || "See the browser console for details.");
+        }
+        window.addEventListener("error", function (e) {
+          if (e && e.target && e.target.tagName === "SCRIPT") diagnose("Could not load " + (e.target.src || "the script bundle") + ".");
+        }, true);
+        setTimeout(diagnose, 2500);
+      })();
+    </script>
+    <!--
+      Relative on purpose. With an absolute "/src/main.ts" this page breaks the
+      moment it is served from a subdirectory, because the browser then looks in
+      the server root - and in this repo that is src/main.c, not main.ts.
+      Vite rewrites this to the hashed bundle at build time.
+    -->
+    <script type="module" src="./src/main.ts"></script>
   </body>
 </html>

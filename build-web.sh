@@ -163,6 +163,18 @@ fi
 
 echo "==> vite build"
 npm --prefix web run build
+
+# Post-build sanity: the built page must reference the hashed bundle RELATIVELY
+# and must not still point at TypeScript. An absolute path breaks the moment
+# dist/ is served from a subdirectory, and a .ts entry means the build did not
+# actually replace the dev entry point.
+entry=$(sed -n 's/.*<script type="module"[^>]*src="\([^"]*\)".*/\1/p' web/dist/index.html | head -1)
+case "$entry" in
+  ./assets/*.js) : ;;
+  /*)  echo "build-web.sh: ERROR dist entry '$entry' is absolute; it must be relative" >&2; exit 1 ;;
+  *.ts) echo "build-web.sh: ERROR dist still points at TypeScript ('$entry')" >&2; exit 1 ;;
+  *)   echo "build-web.sh: ERROR unexpected dist entry '$entry'" >&2; exit 1 ;;
+esac
 echo
 echo "==> web/dist is ready - copy it to a docroot:"
 du -sh web/dist 2>/dev/null || true

@@ -407,7 +407,15 @@ class App {
   }
 }
 
+declare global {
+  interface Window { __asciisweeperBooted?: boolean }
+}
+
 async function boot(): Promise<void> {
+  // Tells the guard in index.html that the module really did run, so it stops
+  // waiting to report a failure. Set before any await, since the guard fires on a
+  // timer and wasm loading can be slow on a cold cache.
+  window.__asciisweeperBooted = true;
   const canvas = document.getElementById("screen") as HTMLCanvasElement;
   const ime = document.getElementById("ime") as HTMLInputElement;
   const bootMsg = document.getElementById("boot");
