@@ -1,0 +1,49 @@
+# asciisweeper web client + multiplayer bridge, behind nginx.
+#
+# nginx terminates TLS for both the static files and /ws with the certificate you
+# already have, and reaches the bridge over loopback.
+
+# Older nginx builds do not know the .wasm media type. Without this,
+# WebAssembly.instantiateStreaming refuses the response and the client falls back
+# to a slower arrayBuffer path. Add to the http{} block, or to mime.types:
+#
+#   types { application/wasm wasm; }
+
+server {
+    listen 443 ssl http2;
+    server_name example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
+
+    root /var/www/sweeper;
+    index index.html;
+
+    # Hashed filenames, so these can be cached hard.
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # The multiplayer bridge.
+    location /ws {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        # THIS MATTERS. nginx's default proxy_read_timeout is 60s, which is
+        # SHORTER than asciisweeper-server's own 90s idle disconnect. A turn-based
+        # game is quiet by design, so an opponent thinking for a minute would be
+        # dropped through no fault of the game. The client also sends MSG_PING
+        # every 25s, but do not rely on that alone.
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+    }
+}

@@ -1,0 +1,30 @@
+# asciisweeper web client + multiplayer bridge, behind Caddy.
+#
+# Caddy terminates TLS for both the static files and /ws using the certificate it
+# already manages, and reaches the bridge over loopback. The bridge therefore
+# does no TLS of its own, and asciisweeper-server keeps its existing certificate
+# setup and gains no new network exposure.
+
+example.com {
+	encode gzip
+
+	# The multiplayer bridge. This must come BEFORE the file_server so the
+	# WebSocket upgrade is not served as a static 404.
+	handle /ws* {
+		reverse_proxy 127.0.0.1:8080 {
+			# A turn-based game is quiet by nature: an opponent thinking for a
+			# minute sends nothing at all. Caddy's default has no read timeout,
+			# which is what we want - do not add a short one here.
+			transport http {
+				read_timeout 0
+			}
+		}
+	}
+
+	handle {
+		root * /var/www/sweeper
+		# Caddy already serves .wasm as application/wasm, so streaming
+		# instantiation works with no extra configuration.
+		file_server
+	}
+}

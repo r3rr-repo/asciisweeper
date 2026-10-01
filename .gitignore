@@ -7,3 +7,7 @@ CMakeCache.txt
 cmake_install.cmake
 CTestTestfile.cmake
 Makefile
+
+# web client (web/wasm/core.wasm and core.hash ARE committed on purpose)
+web/node_modules/
+web/dist/

@@ -1,0 +1,39 @@
+# systemd unit for the asciisweeper multiplayer bridge.
+#
+#   sudo cp asciisweeper-bridge.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now asciisweeper-bridge
+#
+# Adjust WorkingDirectory, the --ca path and User to match the host. The --ca file
+# is the same certificate the native client would be given: the bridge pins the
+# game server's certificate upstream, which is the job a browser cannot do.
+
+[Unit]
+Description=asciisweeper multiplayer WebSocket bridge
+After=network-online.target
+Wants=network-online.target
+# Start after the game server, since the bridge dials into it.
+After=asciisweeper-server.service
+
+[Service]
+Type=simple
+User=asciisweeper
+Group=asciisweeper
+WorkingDirectory=/opt/asciisweeper/web/bridge
+ExecStart=/usr/bin/node bridge.mjs \
+  --bind 127.0.0.1 \
+  --listen 8080 \
+  --upstream 127.0.0.1:4443 \
+  --ca /etc/letsencrypt/live/example.com/fullchain.pem
+Restart=on-failure
+RestartSec=2
+
+# It only needs loopback networking and its own directory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/asciisweeper
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

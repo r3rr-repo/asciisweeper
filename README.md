@@ -126,6 +126,31 @@ If your connection drops mid-match, the client automatically tries to
 reconnect using your session token for up to 60 seconds before giving up
 and returning to the menu.
 
+## Browser version
+
+There is also a WebGL client that renders the same ASCII grid in a browser —
+same glyphs, same palette, same centred board — with the same single-player and
+multiplayer modes.
+
+```sh
+./build-web.sh          # -> web/dist/, static files, copy to a docroot
+./build-web.sh --serve  # dev server
+./build-web.sh --test   # typecheck + 637 tests
+```
+
+**The C is not modified for it.** `src/` and `CMakeLists.txt` are exactly what
+the terminal game builds from; [`src/board.c`](src/board.c) and
+[`src/net_io.c`](src/net_io.c) are compiled *as they are* to WebAssembly, so the
+rules and the wire protocol stay defined once for all three programs. The only
+trick is a fake `<openssl/ssl.h>` on the wasm build's include path, which lets
+`net_io.c` compile without its five TLS framing functions — see
+[`web/README.md`](web/README.md).
+
+Multiplayer needs one extra process, because browsers cannot open raw TLS
+sockets: [`web/bridge/bridge.mjs`](web/bridge/bridge.mjs) relays bytes between a
+WebSocket and `asciisweeper-server`. It never parses the protocol, so the server
+is unchanged and a browser player can be matched against a terminal player.
+
 ## How it works
 
 The Minesweeper rules (board state, flood-fill reveal, flagging, chording,

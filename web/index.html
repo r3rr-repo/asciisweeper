@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>asciisweeper</title>
+    <meta name="description" content="Minesweeper rendered as an ASCII terminal, drawn with WebGL." />
+    <style>
+      /* The canvas letterboxes itself in the terminal's default background, so
+         the page background must be the same colour or the seams show. The real
+         value is written here at boot from the palette. */
+      :root { --term-bg: #000000; }
+      html, body { margin: 0; padding: 0; height: 100%; background: var(--term-bg); }
+      body { overflow: hidden; }
+      #screen { display: block; width: 100vw; height: 100vh; outline: none; touch-action: none; }
+      /* Off-screen but focusable: exists only so mobile keyboards appear and so
+         paste/IME composition has somewhere to land. All visible text is drawn
+         in the grid. */
+      #ime {
+        position: fixed; top: 0; left: 0; width: 1px; height: 1px;
+        opacity: 0; border: 0; padding: 0; background: transparent; color: transparent;
+      }
+      #boot {
+        position: fixed; inset: 0; display: grid; place-items: center;
+        color: #aaaaaa; font: 14px ui-monospace, Menlo, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="screen" tabindex="0"></canvas>
+    <input id="ime" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-hidden="true" />
+    <div id="boot">loading&hellip;</div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
