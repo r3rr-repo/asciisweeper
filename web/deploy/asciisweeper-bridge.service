@@ -3,9 +3,18 @@
 #   sudo cp asciisweeper-bridge.service /etc/systemd/system/
 #   sudo systemctl daemon-reload && sudo systemctl enable --now asciisweeper-bridge
 #
-# Adjust WorkingDirectory, the --ca path and User to match the host. The --ca file
-# is the same certificate the native client would be given: the bridge pins the
-# game server's certificate upstream, which is the job a browser cannot do.
+# Adjust WorkingDirectory, User and the upstream flags to match the host.
+#
+# --servername is NOT optional here, and is the easiest thing to get wrong. Node
+# verifies the upstream certificate against `servername || host`, so connecting to
+# 127.0.0.1 without it checks the certificate against the IP - which a certificate
+# issued for a domain name does not cover, and the handshake fails with
+# "Hostname/IP does not match certificate's altnames". Passing --ca does not help;
+# the identity check still uses the host. Set it to the name in the certificate.
+#
+# Drop --ca entirely if the game server's certificate is publicly valid (Let's
+# Encrypt): the system trust store covers it. Keep it to pin a private CA, or when
+# the certificate is self-signed. See ../bridge/README.md for the full table.
 
 [Unit]
 Description=asciisweeper multiplayer WebSocket bridge
@@ -23,7 +32,7 @@ ExecStart=/usr/bin/node bridge.mjs \
   --bind 127.0.0.1 \
   --listen 8080 \
   --upstream 127.0.0.1:4443 \
-  --ca /etc/letsencrypt/live/example.com/fullchain.pem
+  --servername example.com
 Restart=on-failure
 RestartSec=2
 

@@ -30,6 +30,34 @@ node bridge.mjs --listen 8080 --upstream 127.0.0.1:4443 --ca /path/to/cert.pem
 
 `GET /healthz` returns `ok` for health checks.
 
+## Choosing the upstream flags
+
+**`--servername` is the one easy mistake.** Node verifies the upstream
+certificate against `servername || host`, so dialling `127.0.0.1` without it
+checks the certificate against the *IP address*. A certificate issued for a
+domain name has no IP SAN, so the handshake fails:
+
+```
+upstream error: Hostname/IP does not match certificate's altnames
+```
+
+**`--ca` does not fix this** — the identity check still uses the host. The bridge
+prints a note at startup when it spots the combination.
+
+| The game server's certificate is... | Flags |
+|---|---|
+| Issued for a domain (Let's Encrypt etc.) | `--upstream 127.0.0.1:4443 --servername yourdomain.com` |
+| Signed by a private CA | `--upstream 127.0.0.1:4443 --servername <name in cert> --ca /path/ca.pem` |
+| Self-signed **with** `IP:127.0.0.1` in its SANs | `--upstream 127.0.0.1:4443 --ca /path/server.crt` |
+
+With a publicly valid certificate, `--ca` is unnecessary: the system trust store
+covers it. Adding it pins more tightly, which is fine — but `--servername` is
+still required.
+
+The third row is the case the main README's local-testing recipe produces, since
+that `openssl req` includes `IP:127.0.0.1` in `subjectAltName`. It is why local
+testing works with `--ca` alone and a deployment often does not.
+
 ## TLS
 
 **This process does not terminate TLS.** Put it behind the reverse proxy that

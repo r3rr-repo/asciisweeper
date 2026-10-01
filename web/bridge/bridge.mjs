@@ -159,6 +159,20 @@ http.listen(opt.listen, opt.host, () => {
   if (!ca && !opt.insecure) {
     log("bridge: no --ca given, using the system trust store for the upstream");
   }
+  /*
+   * Node verifies the upstream certificate against `servername || host`. Reaching
+   * a loopback address with no --servername therefore checks the certificate
+   * against the IP, which only succeeds if it carries an IP SAN. A certificate
+   * issued for a domain name will fail with "Hostname/IP does not match
+   * certificate's altnames" on the first connection - so say so now, before a
+   * player hits it. Note --ca alone does NOT help: the identity check still uses
+   * the host.
+   */
+  if (!opt.insecure && !upstreamServername && isIpLiteral(opt.upstreamHost)) {
+    log(`bridge: NOTE upstream is the IP ${opt.upstreamHost} and no --servername was given,`);
+    log("bridge:      so its certificate must contain a matching IP SAN. If it was issued");
+    log("bridge:      for a domain name, pass --servername <that name>.");
+  }
 });
 
 for (const sig of ["SIGINT", "SIGTERM"]) {
