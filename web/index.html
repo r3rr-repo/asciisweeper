@@ -3,8 +3,82 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>asciisweeper</title>
-    <meta name="description" content="Minesweeper rendered as an ASCII terminal, drawn with WebGL." />
+
+    <title>asciisweeper - Minesweeper in ASCII, in your browser</title>
+    <meta
+      name="description"
+      content="Classic Minesweeper rendered as an ASCII terminal and drawn with WebGL. Flood-fill reveals, chording, a live timer, and turn-based multiplayer."
+    />
+    <meta name="application-name" content="asciisweeper" />
+    <meta name="robots" content="index, follow" />
+    <meta name="color-scheme" content="dark" />
+    <!-- Matches the palette's defaultBg, so the browser chrome does not flash a
+         different colour around a page that is almost entirely terminal black. -->
+    <meta name="theme-color" content="#000000" />
+
+    <!--
+      Icons and the manifest stay RELATIVE, because dist/ is designed to work in
+      a subdirectory as well as at a domain root. The social tags below are the
+      exact opposite: og:image and canonical must be absolute or the scrapers
+      ignore them, which is why they need a build-time SITE_URL.
+    -->
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="manifest" href="./site.webmanifest" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="asciisweeper" />
+    <meta property="og:title" content="asciisweeper - Minesweeper in ASCII" />
+    <meta
+      property="og:description"
+      content="Classic Minesweeper rendered as an ASCII terminal and drawn with WebGL, with turn-based multiplayer against another player."
+    />
+    <meta property="og:locale" content="en_GB" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="asciisweeper - Minesweeper in ASCII" />
+    <meta
+      name="twitter:description"
+      content="Classic Minesweeper rendered as an ASCII terminal and drawn with WebGL, with turn-based multiplayer against another player."
+    />
+
+    <!--SITE_URL_ONLY
+      Everything in this block needs an absolute URL. vite.config.ts fills in
+      %SITE_URL% when it is set at build time and DELETES the whole block when it
+      is not, because a relative or placeholder og:image is worse than none: the
+      scrapers would cache a broken preview.
+    -->
+    <link rel="canonical" href="%SITE_URL%/" />
+    <meta property="og:url" content="%SITE_URL%/" />
+    <meta property="og:image" content="%SITE_URL%/social-card.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="An ASCII Minesweeper board in a terminal, flanked by two blocky player avatars."
+    />
+    <meta name="twitter:image" content="%SITE_URL%/social-card.png" />
+    <meta
+      name="twitter:image:alt"
+      content="An ASCII Minesweeper board in a terminal, flanked by two blocky player avatars."
+    />
+    <!--/SITE_URL_ONLY-->
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "VideoGame",
+        "name": "asciisweeper",
+        "description": "Classic Minesweeper rendered as an ASCII terminal and drawn with WebGL, with turn-based multiplayer.",
+        "applicationCategory": "GameApplication",
+        "genre": "Puzzle",
+        "operatingSystem": "Any browser with WebGL",
+        "browserRequirements": "Requires WebGL and WebAssembly",
+        "playMode": ["SinglePlayer", "MultiPlayer"],
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      }
+    </script>
     <style>
       /* The canvas letterboxes itself in the terminal's default background, so
          the page background must be the same colour or the seams show. The real

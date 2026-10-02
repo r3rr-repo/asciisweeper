@@ -135,7 +135,8 @@ multiplayer modes.
 ```sh
 ./build-web.sh          # -> web/dist/, static files, copy to a docroot
 ./build-web.sh --serve  # dev server, for playing locally
-./build-web.sh --test   # typecheck + 637 tests
+./build-web.sh --test   # typecheck + 695 tests
+./build-web.sh --card   # regenerate the social card and icons
 ```
 
 **The C is not modified for it.** `src/` and `CMakeLists.txt` are exactly what
@@ -192,12 +193,36 @@ The paths differ by OS; adjust as you read:
 ./build-web.sh
 ```
 
-That produces `web/dist/` — three files, about 60 KB in total:
+Two optional build-time variables:
+
+```sh
+SITE_URL=https://yourdomain.com \
+WS_URL=wss://yourdomain.com/ws \
+  ./build-web.sh
+```
+
+**`SITE_URL`** makes link previews work. `og:image` and `canonical` must be
+absolute URLs — relative ones are ignored by Facebook, X, Slack and Discord — so
+without it those tags are **omitted rather than wrong**, and the build says so.
+It also enables `robots.txt` and `sitemap.xml`, which only matter at a domain
+root anyway.
+
+**`WS_URL`** sets the default multiplayer endpoint. Leave it unset and the client
+uses `/ws` on whatever origin serves the page, which is the usual arrangement.
+Set it when the bridge lives on a different host — note that an `https` page can
+only open `wss`, never `ws`, so a separately hosted bridge needs its own
+certificate. Players can also override it in the multiplayer menu.
+
+That produces `web/dist/` — about 85 KB in total:
 
 ```
-index.html                 3.8 KB
-assets/index-<hash>.js      46 KB   client, renderer and the ncurses shim
-assets/core-<hash>.wasm     11 KB   board.c + net_io.c
+index.html                  7 KB
+assets/index-<hash>.js     46 KB   client, renderer and the ncurses shim
+assets/core-<hash>.wasm    11 KB   board.c + net_io.c
+social-card.png            24 KB   generated from a real frame of the game
+favicon.svg, icon-*.png           the avatar face
+site.webmanifest
+robots.txt, sitemap.xml           only with SITE_URL
 ```
 
 Asset paths are relative, so it works at a domain root or in a subdirectory like

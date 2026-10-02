@@ -25,7 +25,7 @@ import {
 import { clampDifficulty } from "./game/layout";
 import { SinglePlayer } from "./game/single";
 import { Multiplayer } from "./game/multi";
-import { loadConfig, resolveWsUrl, saveConfig, type Config } from "./config";
+import { loadConfig, resolveWsUrl, saveConfig, validateWsUrl, type Config } from "./config";
 
 /** src/main.c:1143-1149 - the C exits outright below this; we draw a message. */
 const MIN_COLS = 40;
@@ -40,7 +40,7 @@ type Mode =
   | { kind: "menu"; sel: number }
   | { kind: "avatar" }
   | { kind: "custom"; fields: LineEdit[]; active: number }
-  | { kind: "name"; editor: LineEdit }
+  | { kind: "mpSetup"; fields: LineEdit[]; active: number; error: string }
   | { kind: "single"; game: SinglePlayer }
   | { kind: "multi"; game: Multiplayer }
   | { kind: "testcard" }
@@ -190,9 +190,18 @@ class App {
         ], this.mode.active);
         break;
       }
-      case "name":
-        drawPrompt(s, "MULTIPLAYER", [{ label: "Your name", value: this.mode.editor.display }], 0);
+      case "mpSetup": {
+        const f = this.mode.fields;
+        drawPrompt(s, "MULTIPLAYER", [
+          { label: "Server", value: f[0].text === "" && this.mode.active !== 0 ? "(this site)" : f[0].display },
+          { label: "Your name", value: f[1].display },
+        ], this.mode.active);
+        const err = this.mode.error;
+        if (err) {
+          s.withAttrs(CP_LOSE, true, () => s.print(s.rows - 3, s.centreCol(0, s.cols, err), err));
+        }
         break;
+      }
       case "single":
         this.mode.game.update(nowMs);
         this.mode.game.render(s, nowMs);
@@ -299,7 +308,17 @@ class App {
         this.mode = { kind: "avatar" };
         return;
       case MENU_MULTIPLAYER:
-        this.mode = { kind: "name", editor: new LineEdit(this.core.consts.maxNameLen, this.config.name) };
+        this.mode = {
+          kind: "mpSetup",
+          // Blank server means this site, which is the usual deployment; the
+          // field exists for a bridge hosted somewhere else.
+          fields: [
+            new LineEdit(120, this.config.wsUrl ?? ""),
+            new LineEdit(this.core.consts.maxNameLen, this.config.name),
+          ],
+          active: 0,
+          error: "",
+        };
         this.input.setTextEntry(true);
         return;
       case MENU_QUIT:
@@ -361,21 +380,38 @@ class App {
         return;
       }
 
-      case "name": {
-        const r = this.mode.editor.handle(k);
+      case "mpSetup": {
+        const m = this.mode;
+        const r = m.fields[m.active].handle(k);
         if (r === "cancel") {
           this.input.setTextEntry(false);
           this.mode = { kind: "menu", sel: MENU_MULTIPLAYER };
-        } else if (r === "commit") {
-          const name = this.mode.editor.text.trim() || "Player";
-          this.config.name = name;
-          saveConfig(this.config);
-          this.input.setTextEntry(false);
-          this.mode = {
-            kind: "multi",
-            game: new Multiplayer(this.core, resolveWsUrl(this.config), name, this.config.avatar),
-          };
+          return;
         }
+        if (r !== "commit") {
+          m.error = "";
+          return;
+        }
+        if (m.active === 0) {
+          // Catch a bad server URL here rather than letting it surface later as
+          // an unexplained "connection failed".
+          const problem = validateWsUrl(m.fields[0].text);
+          if (problem) { m.error = problem; return; }
+          m.error = "";
+          m.active = 1;
+          return;
+        }
+        const problem = validateWsUrl(m.fields[0].text);
+        if (problem) { m.error = problem; m.active = 0; return; }
+
+        this.config.wsUrl = m.fields[0].text.trim() || null;
+        this.config.name = m.fields[1].text.trim() || "Player";
+        saveConfig(this.config);
+        this.input.setTextEntry(false);
+        this.mode = {
+          kind: "multi",
+          game: new Multiplayer(this.core, resolveWsUrl(this.config), this.config.name, this.config.avatar),
+        };
         return;
       }
 

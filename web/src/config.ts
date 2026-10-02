@@ -4,7 +4,9 @@
  * Differences from the C, all forced by the browser:
  *   - last_host + last_port + last_ca_file collapse into one optional wsUrl.
  *     null means "same origin", which is the normal case when the bridge is
- *     served at /ws next to the static files, so there is nothing to type.
+ *     served at /ws next to the static files, so there is nothing to type. A
+ *     different default can be baked in with WS_URL at build time, and a player
+ *     can override it from the multiplayer menu.
  *   - The CA file is gone: a browser cannot pin a certificate authority. The
  *     bridge does the upstream pinning instead.
  *
@@ -13,6 +15,10 @@
  * every load, and the per-field fallback for a partially-corrupt store.
  */
 const KEY = "asciisweeper.config.v1";
+
+/** Injected by vite.config.ts from the WS_URL build variable; null = same origin. */
+declare const __WS_URL__: string | null;
+const BUILD_WS_URL: string | null = typeof __WS_URL__ === "string" ? __WS_URL__ : null;
 
 export interface Config {
   v: 1;
@@ -31,7 +37,7 @@ function defaults(randomAvatar: () => { skin: number; hair: number }): Config {
   return {
     v: 1,
     avatar: randomAvatar(),
-    wsUrl: null,
+    wsUrl: BUILD_WS_URL,
     name: "Player",
     baseCell: { w: 10, h: 20 },
     brightenBlack: true,
@@ -90,4 +96,30 @@ export function resolveWsUrl(c: Config): string {
   if (c.wsUrl) return c.wsUrl;
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
   return `${scheme}//${location.host}/ws`;
+}
+
+/**
+ * Validates a server URL typed into the multiplayer menu. Returns null when it
+ * is acceptable, or a message to show.
+ *
+ * The mixed-content rule is the one worth catching early: a page served over
+ * https can only open wss, never ws - the browser blocks it outright, and the
+ * only symptom otherwise is a connection that fails for no stated reason.
+ */
+export function validateWsUrl(raw: string): string | null {
+  const v = raw.trim();
+  if (!v) return null; // blank is valid: it means this site
+  let u: URL;
+  try {
+    u = new URL(v);
+  } catch {
+    return "Not a valid URL. Example: wss://play.example.com/ws";
+  }
+  if (u.protocol !== "ws:" && u.protocol !== "wss:") {
+    return "Server URL must start with ws:// or wss://";
+  }
+  if (location.protocol === "https:" && u.protocol === "ws:") {
+    return "This page is https, so the server must be wss:// (ws:// is blocked)";
+  }
+  return null;
 }

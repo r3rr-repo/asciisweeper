@@ -7,6 +7,14 @@
 #   ./build-web.sh --serve         Vite dev server with HMR
 #   ./build-web.sh --test          typecheck + the offline test suites
 #   ./build-web.sh --e2e           multiplayer test against a running server+bridge
+#   ./build-web.sh --card          regenerate the social card and icons
+#
+# Build-time variables:
+#   SITE_URL=https://your.domain   absolute URL, for canonical/og:image and for
+#                                  robots.txt + sitemap.xml. Without it those are
+#                                  omitted and links will not unfurl.
+#   WS_URL=wss://host/ws           default multiplayer endpoint. Without it the
+#                                  client uses /ws on whatever origin serves it.
 #   ./build-web.sh --allow-stale   skip the staleness check
 #
 # web/wasm/core.wasm is committed, so the ordinary path needs no C toolchain at
@@ -26,13 +34,14 @@ HASH_OUT=web/wasm/core.hash
 WASM_SRC="src/board.c src/board.h src/net_io.c src/net_io.h src/net_proto.h \
           web/core/core_api.c web/core/shim/openssl/ssl.h"
 
-FORCE_WASM=0; SERVE=0; TEST=0; ALLOW_STALE=0; E2E=0
+FORCE_WASM=0; SERVE=0; TEST=0; ALLOW_STALE=0; E2E=0; CARD=0
 for arg in "$@"; do
   case "$arg" in
     --wasm)        FORCE_WASM=1 ;;
     --serve)       SERVE=1 ;;
     --test)        TEST=1 ;;
     --e2e)         E2E=1 ;;
+    --card)        CARD=1 ;;
     --allow-stale) ALLOW_STALE=1 ;;
     -h|--help)     sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)             echo "build-web.sh: unknown option '$arg'" >&2; exit 2 ;;
@@ -147,6 +156,14 @@ check_stale
 command -v npm >/dev/null 2>&1 || { echo "build-web.sh: npm not found" >&2; exit 1; }
 [ -d web/node_modules ] || { echo "==> npm install"; npm --prefix web install --no-fund --no-audit; }
 
+if [ "$CARD" = 1 ]; then
+  echo "==> regenerating the social card and icons"
+  TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+  (cd web && ./node_modules/.bin/esbuild tools/make-card.ts \
+     --bundle --platform=node --format=esm --outfile="$TMP/make-card.mjs" --log-level=warning)
+  exec node "$TMP/make-card.mjs" "$ROOT/web"
+fi
+
 if [ "$E2E" = 1 ]; then
   # Needs asciisweeper-server and the bridge already running; see
   # web/bridge/README.md. Drives two clients through the real bridge into the
@@ -167,6 +184,9 @@ if [ "$TEST" = 1 ]; then
   # no browser. esbuild is already a Vite dependency, so it bundles it for Node.
   (cd web && ./node_modules/.bin/esbuild test/render.test.ts --bundle --platform=node --format=esm --outfile="$TMP/render.mjs" --log-level=warning)
   node "$TMP/render.mjs"
+  echo "==> seo tests"
+  (cd web && ./node_modules/.bin/esbuild test/seo.test.ts --bundle --platform=node --format=esm --outfile="$TMP/seo.mjs" --log-level=warning)
+  node "$TMP/seo.mjs" "$ROOT/web"
   echo "==> shader math tests"
   (cd web && ./node_modules/.bin/esbuild test/shader.test.ts --bundle --platform=node --format=esm --outfile="$TMP/shader.mjs" --log-level=warning)
   node "$TMP/shader.mjs"
@@ -174,6 +194,12 @@ if [ "$TEST" = 1 ]; then
 fi
 if [ "$SERVE" = 1 ]; then
   echo "==> dev server"; exec npm --prefix web run dev
+fi
+
+if [ -z "${SITE_URL:-}" ]; then
+  echo "==> note: SITE_URL is not set, so canonical/og:image are omitted and"
+  echo "          links to this build will not unfurl. Set it to enable them:"
+  echo "          SITE_URL=https://your.domain ./build-web.sh"
 fi
 
 echo "==> vite build"
@@ -190,6 +216,20 @@ case "$entry" in
   *.ts) echo "build-web.sh: ERROR dist still points at TypeScript ('$entry')" >&2; exit 1 ;;
   *)   echo "build-web.sh: ERROR unexpected dist entry '$entry'" >&2; exit 1 ;;
 esac
+
+# No build-time placeholder may survive into the shipped page.
+if grep -q '%SITE_URL%' web/dist/index.html; then
+  echo "build-web.sh: ERROR %SITE_URL% placeholder left in dist/index.html" >&2; exit 1
+fi
+# og:image must be absolute exactly when SITE_URL was set - a relative one is
+# silently ignored by the scrapers, and a stale one gets cached by them.
+if [ -n "${SITE_URL:-}" ]; then
+  grep -q 'property="og:image" content="https\?://' web/dist/index.html || {
+    echo "build-web.sh: ERROR SITE_URL was set but og:image is not absolute" >&2; exit 1; }
+else
+  grep -q 'property="og:image"' web/dist/index.html && {
+    echo "build-web.sh: ERROR og:image present without SITE_URL" >&2; exit 1; }
+fi
 echo
 echo "==> web/dist is ready - copy it to a docroot:"
 du -sh web/dist 2>/dev/null || true

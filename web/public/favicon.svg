@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" shape-rendering="crispEdges">
+<rect width="96" height="96" fill="#000000"/>
+<rect x="-0.5" y="-0.5" width="17" height="17" fill="#aa00aa"/>
+<rect x="15.5" y="-0.5" width="17" height="17" fill="#aa00aa"/>
+<rect x="31.5" y="-0.5" width="17" height="17" fill="#aa00aa"/>
+<rect x="47.5" y="-0.5" width="17" height="17" fill="#aa00aa"/>
+<rect x="63.5" y="-0.5" width="17" height="17" fill="#aa00aa"/>
+<rect x="79.5" y="-0.5" width="17" height="17" fill="#aa00aa"/>
+<rect x="-0.5" y="15.5" width="17" height="17" fill="#aa00aa"/>
+<rect x="15.5" y="15.5" width="17" height="17" fill="#aa00aa"/>
+<rect x="31.5" y="15.5" width="17" height="17" fill="#aa00aa"/>
+<rect x="47.5" y="15.5" width="17" height="17" fill="#aa00aa"/>
+<rect x="63.5" y="15.5" width="17" height="17" fill="#aa00aa"/>
+<rect x="79.5" y="15.5" width="17" height="17" fill="#aa00aa"/>
+<rect x="-0.5" y="31.5" width="17" height="17" fill="#aa5500"/>
+<rect x="15.5" y="31.5" width="17" height="17" fill="#aa5500"/>
+<rect x="31.5" y="31.5" width="17" height="17" fill="#000000"/>
+<rect x="47.5" y="31.5" width="17" height="17" fill="#aa5500"/>
+<rect x="63.5" y="31.5" width="17" height="17" fill="#000000"/>
+<rect x="79.5" y="31.5" width="17" height="17" fill="#aa5500"/>
+<rect x="-0.5" y="47.5" width="17" height="17" fill="#aa5500"/>
+<rect x="15.5" y="47.5" width="17" height="17" fill="#aa5500"/>
+<rect x="31.5" y="47.5" width="17" height="17" fill="#aa5500"/>
+<rect x="47.5" y="47.5" width="17" height="17" fill="#aa5500"/>
+<rect x="63.5" y="47.5" width="17" height="17" fill="#aa5500"/>
+<rect x="79.5" y="47.5" width="17" height="17" fill="#aa5500"/>
+<rect x="-0.5" y="63.5" width="17" height="17" fill="#aa5500"/>
+<rect x="15.5" y="63.5" width="17" height="17" fill="#aa5500"/>
+<rect x="31.5" y="63.5" width="17" height="17" fill="#aa5500"/>
+<rect x="47.5" y="63.5" width="17" height="17" fill="#aa5500"/>
+<rect x="63.5" y="63.5" width="17" height="17" fill="#aa5500"/>
+<rect x="79.5" y="63.5" width="17" height="17" fill="#aa5500"/>
+<rect x="-0.5" y="79.5" width="17" height="17" fill="#aa5500"/>
+<rect x="15.5" y="79.5" width="17" height="17" fill="#aa5500"/>
+<rect x="31.5" y="79.5" width="17" height="17" fill="#aa5500"/>
+<rect x="47.5" y="79.5" width="17" height="17" fill="#aa5500"/>
+<rect x="63.5" y="79.5" width="17" height="17" fill="#aa5500"/>
+<rect x="79.5" y="79.5" width="17" height="17" fill="#aa5500"/>
+</svg>

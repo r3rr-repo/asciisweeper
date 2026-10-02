@@ -14,9 +14,27 @@ for the terminal client, the server and the browser.
 ```sh
 ./build-web.sh            # -> web/dist/   (needs only Node)
 ./build-web.sh --serve    # dev server with HMR
-./build-web.sh --test     # typecheck + 637 tests
+./build-web.sh --test     # typecheck + 695 tests
 ./build-web.sh --wasm     # rebuild core.wasm (needs the wasm toolchain)
+./build-web.sh --card     # regenerate the social card and icons
 ```
+
+Two optional build variables: `SITE_URL` enables the absolute social metadata
+(`canonical`, `og:image`) plus `robots.txt`/`sitemap.xml`, and `WS_URL` sets the
+default multiplayer endpoint. Both are documented in the main README.
+
+## The social card
+
+`web/tools/make-card.ts` is not a mockup. It drives the real `core.wasm` through
+a few moves and renders the resulting board through the same `Surface`,
+`drawBoard`, `drawHud` and `drawAvatar` the game uses, with the same palette, so
+the card is an actual frame — both avatars included, one of them mid-blink. It
+emits `tools/social-card.svg` and rasterises it to `public/social-card.png` with
+`rsvg-convert`, `magick` or `convert`.
+
+That matters because the palette is still placeholder (see "Fidelity status"):
+when it is sampled from a real terminal screenshot, `--card` regenerates a
+correct image, whereas a hand-drawn one would quietly go stale.
 
 `web/dist/` is static files with no runtime — copy it into a docroot and
 single-player works. Asset paths are relative, so it runs unchanged at a domain

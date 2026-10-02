@@ -1,0 +1,394 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+<rect width="100%" height="100%" fill="#000000"/>
+<g><rect x="408" y="123" width="24" height="24" fill="#0000aa"/><rect x="408" y="147" width="24" height="24" fill="#0000aa"/><rect x="408" y="171" width="24" height="24" fill="#0000aa"/><rect x="504" y="171" width="48" height="24" fill="#0000aa"/><rect x="408" y="195" width="144" height="24" fill="#0000aa"/><rect x="528" y="219" width="72" height="24" fill="#0000aa"/><rect x="228" y="243" width="144" height="24" fill="#aa00aa"/><rect x="528" y="243" width="144" height="24" fill="#0000aa"/><rect x="828" y="243" width="144" height="24" fill="#aa0000"/><rect x="228" y="267" width="144" height="24" fill="#aa00aa"/><rect x="552" y="267" width="72" height="24" fill="#0000aa"/><rect x="624" y="267" width="24" height="24" fill="#aaaaaa"/><rect x="648" y="267" width="96" height="24" fill="#0000aa"/><rect x="828" y="267" width="144" height="24" fill="#aa0000"/><rect x="228" y="291" width="48" height="24" fill="#aa5500"/><rect x="300" y="291" width="24" height="24" fill="#aa5500"/><rect x="348" y="291" width="24" height="24" fill="#aa5500"/><rect x="552" y="291" width="192" height="24" fill="#0000aa"/><rect x="828" y="291" width="144" height="24" fill="#00aa00"/><rect x="228" y="315" width="144" height="24" fill="#aa5500"/><rect x="552" y="315" width="144" height="24" fill="#0000aa"/><rect x="828" y="315" width="144" height="24" fill="#00aa00"/><rect x="228" y="339" width="144" height="24" fill="#aa5500"/><rect x="672" y="339" width="24" height="24" fill="#0000aa"/><rect x="828" y="339" width="144" height="24" fill="#00aa00"/><rect x="228" y="363" width="144" height="24" fill="#aa5500"/><rect x="828" y="363" width="144" height="24" fill="#00aa00"/></g>
+<g font-family="Menlo, 'DejaVu Sans Mono', 'Liberation Mono', monospace" font-size="19" text-anchor="middle" dominant-baseline="central" xml:space="preserve">
+<text x="534" y="39" fill="#55ff55" font-weight="bold">A</text>
+<text x="546" y="39" fill="#55ff55" font-weight="bold">S</text>
+<text x="558" y="39" fill="#55ff55" font-weight="bold">C</text>
+<text x="570" y="39" fill="#55ff55" font-weight="bold">I</text>
+<text x="582" y="39" fill="#55ff55" font-weight="bold">I</text>
+<text x="594" y="39" fill="#55ff55" font-weight="bold">S</text>
+<text x="606" y="39" fill="#55ff55" font-weight="bold">W</text>
+<text x="618" y="39" fill="#55ff55" font-weight="bold">E</text>
+<text x="630" y="39" fill="#55ff55" font-weight="bold">E</text>
+<text x="642" y="39" fill="#55ff55" font-weight="bold">P</text>
+<text x="654" y="39" fill="#55ff55" font-weight="bold">E</text>
+<text x="666" y="39" fill="#55ff55" font-weight="bold">R</text>
+<text x="462" y="87" fill="#aaaaaa">M</text>
+<text x="474" y="87" fill="#aaaaaa">i</text>
+<text x="486" y="87" fill="#aaaaaa">n</text>
+<text x="498" y="87" fill="#aaaaaa">e</text>
+<text x="510" y="87" fill="#aaaaaa">s</text>
+<text x="522" y="87" fill="#aaaaaa">:</text>
+<text x="546" y="87" fill="#aaaaaa">0</text>
+<text x="558" y="87" fill="#aaaaaa">3</text>
+<text x="570" y="87" fill="#aaaaaa">9</text>
+<text x="630" y="87" fill="#aaaaaa">T</text>
+<text x="642" y="87" fill="#aaaaaa">i</text>
+<text x="654" y="87" fill="#aaaaaa">m</text>
+<text x="666" y="87" fill="#aaaaaa">e</text>
+<text x="678" y="87" fill="#aaaaaa">:</text>
+<text x="702" y="87" fill="#aaaaaa">0</text>
+<text x="714" y="87" fill="#aaaaaa">4</text>
+<text x="726" y="87" fill="#aaaaaa">2</text>
+<text x="402" y="111" fill="#aaaaaa">+</text>
+<text x="414" y="111" fill="#aaaaaa">-</text>
+<text x="426" y="111" fill="#aaaaaa">-</text>
+<text x="438" y="111" fill="#aaaaaa">-</text>
+<text x="450" y="111" fill="#aaaaaa">-</text>
+<text x="462" y="111" fill="#aaaaaa">-</text>
+<text x="474" y="111" fill="#aaaaaa">-</text>
+<text x="486" y="111" fill="#aaaaaa">-</text>
+<text x="498" y="111" fill="#aaaaaa">-</text>
+<text x="510" y="111" fill="#aaaaaa">-</text>
+<text x="522" y="111" fill="#aaaaaa">-</text>
+<text x="534" y="111" fill="#aaaaaa">-</text>
+<text x="546" y="111" fill="#aaaaaa">-</text>
+<text x="558" y="111" fill="#aaaaaa">-</text>
+<text x="570" y="111" fill="#aaaaaa">-</text>
+<text x="582" y="111" fill="#aaaaaa">-</text>
+<text x="594" y="111" fill="#aaaaaa">-</text>
+<text x="606" y="111" fill="#aaaaaa">-</text>
+<text x="618" y="111" fill="#aaaaaa">-</text>
+<text x="630" y="111" fill="#aaaaaa">-</text>
+<text x="642" y="111" fill="#aaaaaa">-</text>
+<text x="654" y="111" fill="#aaaaaa">-</text>
+<text x="666" y="111" fill="#aaaaaa">-</text>
+<text x="678" y="111" fill="#aaaaaa">-</text>
+<text x="690" y="111" fill="#aaaaaa">-</text>
+<text x="702" y="111" fill="#aaaaaa">-</text>
+<text x="714" y="111" fill="#aaaaaa">-</text>
+<text x="726" y="111" fill="#aaaaaa">-</text>
+<text x="738" y="111" fill="#aaaaaa">-</text>
+<text x="750" y="111" fill="#aaaaaa">-</text>
+<text x="762" y="111" fill="#aaaaaa">-</text>
+<text x="774" y="111" fill="#aaaaaa">-</text>
+<text x="786" y="111" fill="#aaaaaa">-</text>
+<text x="798" y="111" fill="#aaaaaa">+</text>
+<text x="402" y="135" fill="#aaaaaa">|</text>
+<text x="438" y="135" fill="#5555ff" font-weight="bold">1</text>
+<text x="462" y="135" fill="#ffff55" font-weight="bold">F</text>
+<text x="486" y="135" fill="#00aaaa">.</text>
+<text x="510" y="135" fill="#00aaaa">.</text>
+<text x="534" y="135" fill="#00aaaa">.</text>
+<text x="558" y="135" fill="#00aaaa">.</text>
+<text x="582" y="135" fill="#00aaaa">.</text>
+<text x="606" y="135" fill="#00aaaa">.</text>
+<text x="630" y="135" fill="#00aaaa">.</text>
+<text x="654" y="135" fill="#00aaaa">.</text>
+<text x="678" y="135" fill="#00aaaa">.</text>
+<text x="702" y="135" fill="#00aaaa">.</text>
+<text x="726" y="135" fill="#00aaaa">.</text>
+<text x="750" y="135" fill="#00aaaa">.</text>
+<text x="774" y="135" fill="#00aaaa">.</text>
+<text x="798" y="135" fill="#aaaaaa">|</text>
+<text x="402" y="159" fill="#aaaaaa">|</text>
+<text x="438" y="159" fill="#5555ff" font-weight="bold">1</text>
+<text x="462" y="159" fill="#00aaaa">.</text>
+<text x="486" y="159" fill="#5555ff" font-weight="bold">1</text>
+<text x="510" y="159" fill="#5555ff" font-weight="bold">1</text>
+<text x="534" y="159" fill="#5555ff" font-weight="bold">1</text>
+<text x="558" y="159" fill="#55ff55" font-weight="bold">2</text>
+<text x="582" y="159" fill="#00aaaa">.</text>
+<text x="606" y="159" fill="#00aaaa">.</text>
+<text x="630" y="159" fill="#00aaaa">.</text>
+<text x="654" y="159" fill="#00aaaa">.</text>
+<text x="678" y="159" fill="#00aaaa">.</text>
+<text x="702" y="159" fill="#00aaaa">.</text>
+<text x="726" y="159" fill="#00aaaa">.</text>
+<text x="750" y="159" fill="#00aaaa">.</text>
+<text x="774" y="159" fill="#00aaaa">.</text>
+<text x="798" y="159" fill="#aaaaaa">|</text>
+<text x="402" y="183" fill="#aaaaaa">|</text>
+<text x="438" y="183" fill="#5555ff" font-weight="bold">1</text>
+<text x="462" y="183" fill="#5555ff" font-weight="bold">1</text>
+<text x="486" y="183" fill="#5555ff" font-weight="bold">1</text>
+<text x="558" y="183" fill="#5555ff" font-weight="bold">1</text>
+<text x="582" y="183" fill="#00aaaa">.</text>
+<text x="606" y="183" fill="#00aaaa">.</text>
+<text x="630" y="183" fill="#00aaaa">.</text>
+<text x="654" y="183" fill="#00aaaa">.</text>
+<text x="678" y="183" fill="#00aaaa">.</text>
+<text x="702" y="183" fill="#00aaaa">.</text>
+<text x="726" y="183" fill="#00aaaa">.</text>
+<text x="750" y="183" fill="#00aaaa">.</text>
+<text x="774" y="183" fill="#00aaaa">.</text>
+<text x="798" y="183" fill="#aaaaaa">|</text>
+<text x="402" y="207" fill="#aaaaaa">|</text>
+<text x="558" y="207" fill="#5555ff" font-weight="bold">1</text>
+<text x="582" y="207" fill="#55ff55" font-weight="bold">2</text>
+<text x="606" y="207" fill="#ff5555" font-weight="bold">3</text>
+<text x="630" y="207" fill="#00aaaa">.</text>
+<text x="654" y="207" fill="#00aaaa">.</text>
+<text x="678" y="207" fill="#00aaaa">.</text>
+<text x="702" y="207" fill="#00aaaa">.</text>
+<text x="726" y="207" fill="#00aaaa">.</text>
+<text x="750" y="207" fill="#00aaaa">.</text>
+<text x="774" y="207" fill="#00aaaa">.</text>
+<text x="798" y="207" fill="#aaaaaa">|</text>
+<text x="402" y="231" fill="#aaaaaa">|</text>
+<text x="414" y="231" fill="#5555ff" font-weight="bold">1</text>
+<text x="438" y="231" fill="#5555ff" font-weight="bold">1</text>
+<text x="462" y="231" fill="#5555ff" font-weight="bold">1</text>
+<text x="486" y="231" fill="#5555ff" font-weight="bold">1</text>
+<text x="510" y="231" fill="#5555ff" font-weight="bold">1</text>
+<text x="606" y="231" fill="#5555ff" font-weight="bold">1</text>
+<text x="630" y="231" fill="#5555ff" font-weight="bold">1</text>
+<text x="654" y="231" fill="#55ff55" font-weight="bold">2</text>
+<text x="678" y="231" fill="#ff5555" font-weight="bold">3</text>
+<text x="702" y="231" fill="#00aaaa">.</text>
+<text x="726" y="231" fill="#00aaaa">.</text>
+<text x="750" y="231" fill="#00aaaa">.</text>
+<text x="774" y="231" fill="#00aaaa">.</text>
+<text x="798" y="231" fill="#aaaaaa">|</text>
+<text x="402" y="255" fill="#aaaaaa">|</text>
+<text x="414" y="255" fill="#00aaaa">.</text>
+<text x="438" y="255" fill="#00aaaa">.</text>
+<text x="462" y="255" fill="#00aaaa">.</text>
+<text x="486" y="255" fill="#00aaaa">.</text>
+<text x="510" y="255" fill="#5555ff" font-weight="bold">1</text>
+<text x="678" y="255" fill="#5555ff" font-weight="bold">1</text>
+<text x="702" y="255" fill="#55ff55" font-weight="bold">2</text>
+<text x="726" y="255" fill="#55ff55" font-weight="bold">2</text>
+<text x="750" y="255" fill="#ff5555" font-weight="bold">3</text>
+<text x="774" y="255" fill="#00aaaa">.</text>
+<text x="798" y="255" fill="#aaaaaa">|</text>
+<text x="402" y="279" fill="#aaaaaa">|</text>
+<text x="414" y="279" fill="#00aaaa">.</text>
+<text x="438" y="279" fill="#00aaaa">.</text>
+<text x="462" y="279" fill="#00aaaa">.</text>
+<text x="486" y="279" fill="#00aaaa">.</text>
+<text x="510" y="279" fill="#55ff55" font-weight="bold">2</text>
+<text x="534" y="279" fill="#5555ff" font-weight="bold">1</text>
+<text x="750" y="279" fill="#5555ff" font-weight="bold">1</text>
+<text x="774" y="279" fill="#00aaaa">.</text>
+<text x="798" y="279" fill="#aaaaaa">|</text>
+<text x="402" y="303" fill="#aaaaaa">|</text>
+<text x="414" y="303" fill="#00aaaa">.</text>
+<text x="438" y="303" fill="#00aaaa">.</text>
+<text x="462" y="303" fill="#00aaaa">.</text>
+<text x="486" y="303" fill="#00aaaa">.</text>
+<text x="510" y="303" fill="#00aaaa">.</text>
+<text x="534" y="303" fill="#55ff55" font-weight="bold">2</text>
+<text x="750" y="303" fill="#5555ff" font-weight="bold">1</text>
+<text x="774" y="303" fill="#00aaaa">.</text>
+<text x="798" y="303" fill="#aaaaaa">|</text>
+<text x="882" y="303" fill="#000000">-</text>
+<text x="894" y="303" fill="#000000">-</text>
+<text x="930" y="303" fill="#000000">-</text>
+<text x="942" y="303" fill="#000000">-</text>
+<text x="402" y="327" fill="#aaaaaa">|</text>
+<text x="414" y="327" fill="#00aaaa">.</text>
+<text x="438" y="327" fill="#00aaaa">.</text>
+<text x="462" y="327" fill="#00aaaa">.</text>
+<text x="486" y="327" fill="#00aaaa">.</text>
+<text x="510" y="327" fill="#00aaaa">.</text>
+<text x="534" y="327" fill="#55ff55" font-weight="bold">2</text>
+<text x="702" y="327" fill="#5555ff" font-weight="bold">1</text>
+<text x="726" y="327" fill="#5555ff" font-weight="bold">1</text>
+<text x="750" y="327" fill="#5555ff" font-weight="bold">1</text>
+<text x="774" y="327" fill="#00aaaa">.</text>
+<text x="798" y="327" fill="#aaaaaa">|</text>
+<text x="402" y="351" fill="#aaaaaa">|</text>
+<text x="414" y="351" fill="#00aaaa">.</text>
+<text x="438" y="351" fill="#00aaaa">.</text>
+<text x="462" y="351" fill="#00aaaa">.</text>
+<text x="486" y="351" fill="#00aaaa">.</text>
+<text x="510" y="351" fill="#00aaaa">.</text>
+<text x="534" y="351" fill="#55ff55" font-weight="bold">2</text>
+<text x="558" y="351" fill="#5555ff" font-weight="bold">1</text>
+<text x="582" y="351" fill="#5555ff" font-weight="bold">1</text>
+<text x="606" y="351" fill="#5555ff" font-weight="bold">1</text>
+<text x="630" y="351" fill="#5555ff" font-weight="bold">1</text>
+<text x="654" y="351" fill="#5555ff" font-weight="bold">1</text>
+<text x="702" y="351" fill="#55ff55" font-weight="bold">2</text>
+<text x="726" y="351" fill="#00aaaa">.</text>
+<text x="750" y="351" fill="#00aaaa">.</text>
+<text x="774" y="351" fill="#00aaaa">.</text>
+<text x="798" y="351" fill="#aaaaaa">|</text>
+<text x="402" y="375" fill="#aaaaaa">|</text>
+<text x="414" y="375" fill="#00aaaa">.</text>
+<text x="438" y="375" fill="#00aaaa">.</text>
+<text x="462" y="375" fill="#00aaaa">.</text>
+<text x="486" y="375" fill="#00aaaa">.</text>
+<text x="510" y="375" fill="#00aaaa">.</text>
+<text x="534" y="375" fill="#00aaaa">.</text>
+<text x="558" y="375" fill="#00aaaa">.</text>
+<text x="582" y="375" fill="#00aaaa">.</text>
+<text x="606" y="375" fill="#00aaaa">.</text>
+<text x="630" y="375" fill="#00aaaa">.</text>
+<text x="654" y="375" fill="#55ff55" font-weight="bold">2</text>
+<text x="678" y="375" fill="#5555ff" font-weight="bold">1</text>
+<text x="702" y="375" fill="#ff5555" font-weight="bold">3</text>
+<text x="726" y="375" fill="#00aaaa">.</text>
+<text x="750" y="375" fill="#00aaaa">.</text>
+<text x="774" y="375" fill="#00aaaa">.</text>
+<text x="798" y="375" fill="#aaaaaa">|</text>
+<text x="402" y="399" fill="#aaaaaa">|</text>
+<text x="414" y="399" fill="#00aaaa">.</text>
+<text x="438" y="399" fill="#00aaaa">.</text>
+<text x="462" y="399" fill="#00aaaa">.</text>
+<text x="486" y="399" fill="#00aaaa">.</text>
+<text x="510" y="399" fill="#00aaaa">.</text>
+<text x="534" y="399" fill="#00aaaa">.</text>
+<text x="558" y="399" fill="#00aaaa">.</text>
+<text x="582" y="399" fill="#00aaaa">.</text>
+<text x="606" y="399" fill="#00aaaa">.</text>
+<text x="630" y="399" fill="#00aaaa">.</text>
+<text x="654" y="399" fill="#00aaaa">.</text>
+<text x="678" y="399" fill="#00aaaa">.</text>
+<text x="702" y="399" fill="#00aaaa">.</text>
+<text x="726" y="399" fill="#00aaaa">.</text>
+<text x="750" y="399" fill="#00aaaa">.</text>
+<text x="774" y="399" fill="#00aaaa">.</text>
+<text x="798" y="399" fill="#aaaaaa">|</text>
+<text x="270" y="423" fill="#aaaaaa">y</text>
+<text x="282" y="423" fill="#aaaaaa">o</text>
+<text x="294" y="423" fill="#aaaaaa">u</text>
+<text x="402" y="423" fill="#aaaaaa">|</text>
+<text x="414" y="423" fill="#00aaaa">.</text>
+<text x="438" y="423" fill="#00aaaa">.</text>
+<text x="462" y="423" fill="#00aaaa">.</text>
+<text x="486" y="423" fill="#00aaaa">.</text>
+<text x="510" y="423" fill="#00aaaa">.</text>
+<text x="534" y="423" fill="#00aaaa">.</text>
+<text x="558" y="423" fill="#00aaaa">.</text>
+<text x="582" y="423" fill="#00aaaa">.</text>
+<text x="606" y="423" fill="#00aaaa">.</text>
+<text x="630" y="423" fill="#00aaaa">.</text>
+<text x="654" y="423" fill="#00aaaa">.</text>
+<text x="678" y="423" fill="#00aaaa">.</text>
+<text x="702" y="423" fill="#00aaaa">.</text>
+<text x="726" y="423" fill="#00aaaa">.</text>
+<text x="750" y="423" fill="#00aaaa">.</text>
+<text x="774" y="423" fill="#00aaaa">.</text>
+<text x="798" y="423" fill="#aaaaaa">|</text>
+<text x="858" y="423" fill="#aaaaaa">t</text>
+<text x="870" y="423" fill="#aaaaaa">h</text>
+<text x="882" y="423" fill="#aaaaaa">e</text>
+<text x="894" y="423" fill="#aaaaaa">m</text>
+<text x="402" y="447" fill="#aaaaaa">|</text>
+<text x="414" y="447" fill="#00aaaa">.</text>
+<text x="438" y="447" fill="#00aaaa">.</text>
+<text x="462" y="447" fill="#00aaaa">.</text>
+<text x="486" y="447" fill="#00aaaa">.</text>
+<text x="510" y="447" fill="#00aaaa">.</text>
+<text x="534" y="447" fill="#00aaaa">.</text>
+<text x="558" y="447" fill="#00aaaa">.</text>
+<text x="582" y="447" fill="#00aaaa">.</text>
+<text x="606" y="447" fill="#00aaaa">.</text>
+<text x="630" y="447" fill="#00aaaa">.</text>
+<text x="654" y="447" fill="#00aaaa">.</text>
+<text x="678" y="447" fill="#00aaaa">.</text>
+<text x="702" y="447" fill="#00aaaa">.</text>
+<text x="726" y="447" fill="#5555ff" font-weight="bold">1</text>
+<text x="750" y="447" fill="#00aaaa">.</text>
+<text x="774" y="447" fill="#00aaaa">.</text>
+<text x="798" y="447" fill="#aaaaaa">|</text>
+<text x="402" y="471" fill="#aaaaaa">|</text>
+<text x="414" y="471" fill="#00aaaa">.</text>
+<text x="438" y="471" fill="#00aaaa">.</text>
+<text x="462" y="471" fill="#00aaaa">.</text>
+<text x="486" y="471" fill="#00aaaa">.</text>
+<text x="510" y="471" fill="#00aaaa">.</text>
+<text x="534" y="471" fill="#00aaaa">.</text>
+<text x="558" y="471" fill="#00aaaa">.</text>
+<text x="582" y="471" fill="#00aaaa">.</text>
+<text x="606" y="471" fill="#00aaaa">.</text>
+<text x="630" y="471" fill="#00aaaa">.</text>
+<text x="654" y="471" fill="#00aaaa">.</text>
+<text x="678" y="471" fill="#00aaaa">.</text>
+<text x="702" y="471" fill="#00aaaa">.</text>
+<text x="726" y="471" fill="#00aaaa">.</text>
+<text x="750" y="471" fill="#00aaaa">.</text>
+<text x="774" y="471" fill="#00aaaa">.</text>
+<text x="798" y="471" fill="#aaaaaa">|</text>
+<text x="402" y="495" fill="#aaaaaa">|</text>
+<text x="414" y="495" fill="#00aaaa">.</text>
+<text x="438" y="495" fill="#00aaaa">.</text>
+<text x="462" y="495" fill="#00aaaa">.</text>
+<text x="486" y="495" fill="#00aaaa">.</text>
+<text x="510" y="495" fill="#00aaaa">.</text>
+<text x="534" y="495" fill="#00aaaa">.</text>
+<text x="558" y="495" fill="#00aaaa">.</text>
+<text x="582" y="495" fill="#00aaaa">.</text>
+<text x="606" y="495" fill="#00aaaa">.</text>
+<text x="630" y="495" fill="#00aaaa">.</text>
+<text x="654" y="495" fill="#00aaaa">.</text>
+<text x="678" y="495" fill="#00aaaa">.</text>
+<text x="702" y="495" fill="#00aaaa">.</text>
+<text x="726" y="495" fill="#00aaaa">.</text>
+<text x="750" y="495" fill="#00aaaa">.</text>
+<text x="774" y="495" fill="#00aaaa">.</text>
+<text x="798" y="495" fill="#aaaaaa">|</text>
+<text x="402" y="519" fill="#aaaaaa">+</text>
+<text x="414" y="519" fill="#aaaaaa">-</text>
+<text x="426" y="519" fill="#aaaaaa">-</text>
+<text x="438" y="519" fill="#aaaaaa">-</text>
+<text x="450" y="519" fill="#aaaaaa">-</text>
+<text x="462" y="519" fill="#aaaaaa">-</text>
+<text x="474" y="519" fill="#aaaaaa">-</text>
+<text x="486" y="519" fill="#aaaaaa">-</text>
+<text x="498" y="519" fill="#aaaaaa">-</text>
+<text x="510" y="519" fill="#aaaaaa">-</text>
+<text x="522" y="519" fill="#aaaaaa">-</text>
+<text x="534" y="519" fill="#aaaaaa">-</text>
+<text x="546" y="519" fill="#aaaaaa">-</text>
+<text x="558" y="519" fill="#aaaaaa">-</text>
+<text x="570" y="519" fill="#aaaaaa">-</text>
+<text x="582" y="519" fill="#aaaaaa">-</text>
+<text x="594" y="519" fill="#aaaaaa">-</text>
+<text x="606" y="519" fill="#aaaaaa">-</text>
+<text x="618" y="519" fill="#aaaaaa">-</text>
+<text x="630" y="519" fill="#aaaaaa">-</text>
+<text x="642" y="519" fill="#aaaaaa">-</text>
+<text x="654" y="519" fill="#aaaaaa">-</text>
+<text x="666" y="519" fill="#aaaaaa">-</text>
+<text x="678" y="519" fill="#aaaaaa">-</text>
+<text x="690" y="519" fill="#aaaaaa">-</text>
+<text x="702" y="519" fill="#aaaaaa">-</text>
+<text x="714" y="519" fill="#aaaaaa">-</text>
+<text x="726" y="519" fill="#aaaaaa">-</text>
+<text x="738" y="519" fill="#aaaaaa">-</text>
+<text x="750" y="519" fill="#aaaaaa">-</text>
+<text x="762" y="519" fill="#aaaaaa">-</text>
+<text x="774" y="519" fill="#aaaaaa">-</text>
+<text x="786" y="519" fill="#aaaaaa">-</text>
+<text x="798" y="519" fill="#aaaaaa">+</text>
+<text x="354" y="591" fill="#00aa00">M</text>
+<text x="366" y="591" fill="#00aa00">i</text>
+<text x="378" y="591" fill="#00aa00">n</text>
+<text x="390" y="591" fill="#00aa00">e</text>
+<text x="402" y="591" fill="#00aa00">s</text>
+<text x="414" y="591" fill="#00aa00">w</text>
+<text x="426" y="591" fill="#00aa00">e</text>
+<text x="438" y="591" fill="#00aa00">e</text>
+<text x="450" y="591" fill="#00aa00">p</text>
+<text x="462" y="591" fill="#00aa00">e</text>
+<text x="474" y="591" fill="#00aa00">r</text>
+<text x="498" y="591" fill="#00aa00">i</text>
+<text x="510" y="591" fill="#00aa00">n</text>
+<text x="534" y="591" fill="#00aa00">A</text>
+<text x="546" y="591" fill="#00aa00">S</text>
+<text x="558" y="591" fill="#00aa00">C</text>
+<text x="570" y="591" fill="#00aa00">I</text>
+<text x="582" y="591" fill="#00aa00">I</text>
+<text x="606" y="591" fill="#00aa00">-</text>
+<text x="630" y="591" fill="#00aa00">n</text>
+<text x="642" y="591" fill="#00aa00">o</text>
+<text x="654" y="591" fill="#00aa00">w</text>
+<text x="678" y="591" fill="#00aa00">i</text>
+<text x="690" y="591" fill="#00aa00">n</text>
+<text x="714" y="591" fill="#00aa00">y</text>
+<text x="726" y="591" fill="#00aa00">o</text>
+<text x="738" y="591" fill="#00aa00">u</text>
+<text x="750" y="591" fill="#00aa00">r</text>
+<text x="774" y="591" fill="#00aa00">b</text>
+<text x="786" y="591" fill="#00aa00">r</text>
+<text x="798" y="591" fill="#00aa00">o</text>
+<text x="810" y="591" fill="#00aa00">w</text>
+<text x="822" y="591" fill="#00aa00">s</text>
+<text x="834" y="591" fill="#00aa00">e</text>
+<text x="846" y="591" fill="#00aa00">r</text>
+</g>
+</svg>
