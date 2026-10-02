@@ -154,9 +154,16 @@ you change the C it is built from. If you do, `build-web.sh` says so and stops
 rather than shipping a stale one, and you will want:
 
 ```sh
-brew install llvm lld wasi-libc wasi-runtimes     # ~79 MB
-# or a wasi-sdk at $WASI_SDK, /opt/wasi-sdk or ~/.wasi-sdk
+# macOS / Linuxbrew, ~79 MB:
+brew install llvm lld wasi-libc wasi-runtimes
+
+# Anywhere else, including FreeBSD: unpack a wasi-sdk release and point
+# $WASI_SDK at it (/opt/wasi-sdk and ~/.wasi-sdk are also searched).
+export WASI_SDK=/opt/wasi-sdk
 ```
+
+`build-web.sh` finds either layout, and tells you how to install one if it finds
+neither. It never downloads anything itself.
 
 ## Hosting the browser version
 
@@ -167,6 +174,17 @@ restarted — same binary, same port, same certificate.
 
 [`web/deploy/README.md`](web/deploy/README.md) is the fuller reference, with a
 troubleshooting table. The steps below are the whole job.
+
+The paths differ by OS; adjust as you read:
+
+| | Linux | FreeBSD |
+|---|---|---|
+| Repo checkout | `/opt/asciisweeper` | `/usr/local/share/asciisweeper` |
+| Docroot | `/var/www/sweeper` | `/usr/local/www/sweeper` |
+| `node` | `/usr/bin/node` | `/usr/local/bin/node` |
+| nginx config | `/etc/nginx/` | `/usr/local/etc/nginx/` |
+| Service | systemd unit | `rc.d` script |
+| Unprivileged user | often `www-data` | `www` |
 
 ### 1. Build, on your workstation
 
@@ -214,8 +232,13 @@ Without it the page still works, via a slower fallback path.
 
 ```sh
 ssh youruser@yourhost
-cd /opt/asciisweeper && git pull origin main
-cd web && npm ci --omit=dev          # installs exactly one package: ws
+
+# Node 18+ and npm, if not already present:
+#   Debian/Ubuntu:  sudo apt install nodejs npm
+#   FreeBSD:        sudo pkg install node npm
+
+cd /opt/asciisweeper && git pull origin main      # or /usr/local/share/asciisweeper
+cd web && npm ci --omit=dev                      # installs exactly one package: ws
 ```
 
 Vite and TypeScript are devDependencies and are deliberately not installed on a
@@ -242,15 +265,50 @@ covers it. The bridge prints a note at startup if it sees an IP upstream with no
 
 ### 6. Install the service
 
+The bridge binds to loopback only in both cases; the reverse proxy reaches it
+locally, so nothing new is exposed to the internet.
+
+**Linux, systemd:**
+
 ```sh
-sudo cp /opt/asciisweeper/web/deploy/asciisweeper-bridge.service /etc/systemd/system/
+sudo cp web/deploy/asciisweeper-bridge.service /etc/systemd/system/
 sudoedit /etc/systemd/system/asciisweeper-bridge.service   # User, paths, step-5 flags
 sudo systemctl daemon-reload
 sudo systemctl enable --now asciisweeper-bridge
+systemctl status asciisweeper-bridge
 ```
 
-The bridge binds to loopback only; the reverse proxy reaches it locally, so
-nothing new is exposed to the internet.
+**FreeBSD, rc.d:**
+
+```sh
+sudo install -m 555 web/deploy/asciisweeper-bridge.rc \
+  /usr/local/etc/rc.d/asciisweeper_bridge
+
+sudo sysrc asciisweeper_bridge_enable="YES"
+sudo sysrc asciisweeper_bridge_servername="yourdomain.com"   # from step 5
+
+sudo service asciisweeper_bridge start
+sudo service asciisweeper_bridge status
+```
+
+Everything is configurable through `rc.conf` rather than by editing the script —
+`sysrc asciisweeper_bridge_ca=...`, `_upstream`, `_listen`, `_bind`, `_user`,
+`_dir`, `_node`, `_logfile`. Run `service asciisweeper_bridge start` once by hand
+before relying on it: the script checks that `node` and `bridge.mjs` are where it
+expects and fails with a clear message if not. Output goes to
+`/var/log/asciisweeper-bridge.log`, and `daemon(8)` restarts the bridge if it
+exits.
+
+Anything else — runit, s6, OpenRC, a supervisor of your choice, or just a
+`tmux` session while you try it out — only needs to run this, as an unprivileged
+user:
+
+```sh
+node /path/to/web/bridge/bridge.mjs --bind 127.0.0.1 --listen 8080 \
+  --upstream 127.0.0.1:4443 --servername yourdomain.com
+```
+
+It stays in the foreground, logs to stdout, and exits on `SIGTERM`/`SIGINT`.
 
 ### 7. Route `/ws` through the reverse proxy
 
@@ -268,7 +326,12 @@ to be right:
   examples set 1h; Caddy has no read timeout by default, which is what you want.
 
 ```sh
-sudo nginx -t && sudo systemctl reload nginx    # or caddy validate && systemctl reload caddy
+# Linux
+sudo nginx -t && sudo systemctl reload nginx
+# FreeBSD
+sudo nginx -t && sudo service nginx reload
+# Caddy, either
+caddy validate --config /path/to/Caddyfile && sudo service caddy reload
 ```
 
 ### 8. Verify

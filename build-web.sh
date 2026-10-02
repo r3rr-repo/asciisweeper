@@ -39,7 +39,22 @@ for arg in "$@"; do
   esac
 done
 
-hash_sources() { cat $WASM_SRC | shasum -a 256 | cut -d' ' -f1; }
+# SHA-256 of stdin, portably. None of these is everywhere: shasum is a Perl
+# script and absent from FreeBSD's base system, sha256sum is GNU, sha256 is BSD.
+# OpenSSL is already a dependency of this project, so it is a dependable last
+# resort (its output is "SHA2-256(stdin)= <hex>" or "(stdin)= <hex>").
+sha256_stdin() {
+  if   command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -d' ' -f1
+  elif command -v shasum    >/dev/null 2>&1; then shasum -a 256 | cut -d' ' -f1
+  elif command -v sha256    >/dev/null 2>&1; then sha256 -q
+  elif command -v openssl   >/dev/null 2>&1; then openssl dgst -sha256 | sed 's/.*= *//'
+  else
+    echo "build-web.sh: no SHA-256 tool found (need sha256sum, shasum, sha256 or openssl)" >&2
+    return 1
+  fi
+}
+
+hash_sources() { cat $WASM_SRC | sha256_stdin; }
 
 # ---------------------------------------------------------------- wasm toolchain
 #

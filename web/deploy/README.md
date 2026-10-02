@@ -9,9 +9,57 @@ Keeping the steps in one place stops the two from drifting.
 
 | File | Purpose |
 |---|---|
-| `asciisweeper-bridge.service` | systemd unit for the bridge. Edit `User`, `WorkingDirectory` and the upstream flags. |
+| `asciisweeper-bridge.service` | systemd unit. Edit `User`, `WorkingDirectory` and the upstream flags. |
+| `asciisweeper-bridge.rc` | FreeBSD `rc.d` script. Configured through `rc.conf`, not by editing it. |
 | `Caddyfile.example` | Caddy: static files plus the `/ws` route. |
 | `nginx.conf.example` | nginx equivalent, including the `.wasm` media type and the read timeout. |
+
+Neither is required. The bridge is a foreground process that logs to stdout and
+exits on `SIGTERM`, so any supervisor will do — runit, s6, OpenRC, a jail's own
+init, or nothing at all while you are trying it out:
+
+```sh
+node web/bridge/bridge.mjs --bind 127.0.0.1 --listen 8080 \
+  --upstream 127.0.0.1:4443 --servername yourdomain.com
+```
+
+## FreeBSD
+
+```sh
+pkg install node npm
+install -m 555 asciisweeper-bridge.rc /usr/local/etc/rc.d/asciisweeper_bridge
+sysrc asciisweeper_bridge_enable="YES"
+sysrc asciisweeper_bridge_servername="yourdomain.com"
+service asciisweeper_bridge start
+```
+
+All settings are `rc.conf` variables, so the script itself never needs editing:
+
+| Variable | Default |
+|---|---|
+| `asciisweeper_bridge_enable` | `NO` |
+| `asciisweeper_bridge_user` | `www` |
+| `asciisweeper_bridge_node` | `/usr/local/bin/node` |
+| `asciisweeper_bridge_dir` | `/usr/local/share/asciisweeper/web/bridge` |
+| `asciisweeper_bridge_bind` | `127.0.0.1` |
+| `asciisweeper_bridge_listen` | `8080` |
+| `asciisweeper_bridge_upstream` | `127.0.0.1:4443` |
+| `asciisweeper_bridge_servername` | *(empty — but see below)* |
+| `asciisweeper_bridge_ca` | *(empty)* |
+| `asciisweeper_bridge_logfile` | `/var/log/asciisweeper-bridge.log` |
+
+`daemon(8)` handles backgrounding, the pidfile, dropping to `_user` and restarting
+the bridge if it exits. Start it by hand once: the script checks that `node` and
+`bridge.mjs` are where it expects, and warns if `ws` has not been installed with
+`npm ci --omit=dev`.
+
+Two FreeBSD-specific notes:
+
+- **`node` lives at `/usr/local/bin/node`**, not `/usr/bin/node`, and `npm` is a
+  separate package from `node`.
+- **`shasum` is not in the base system** — it comes from Perl. `build-web.sh`
+  falls back through `sha256sum`, `shasum`, `sha256` and finally `openssl dgst`,
+  so it works on a stock install. This only matters if you rebuild the wasm.
 
 ## Why `--servername` is required
 

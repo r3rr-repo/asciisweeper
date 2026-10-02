@@ -29,11 +29,21 @@ a stale one rather than let the browser play by different rules than the C.
 ### The wasm toolchain
 
 ```sh
-brew install llvm lld wasi-libc wasi-runtimes     # ~79 MB
+# macOS / Linuxbrew, ~79 MB:
+brew install llvm lld wasi-libc wasi-runtimes
+
+# Anywhere else, including FreeBSD: unpack a wasi-sdk release and point
+# $WASI_SDK at it (/opt/wasi-sdk and ~/.wasi-sdk are also searched).
+export WASI_SDK=/opt/wasi-sdk
 ```
 
-A monolithic `wasi-sdk` at `$WASI_SDK`, `/opt/wasi-sdk` or `~/.wasi-sdk` is also
-recognised. Nothing is downloaded automatically.
+`build-web.sh` accepts either layout and prints install instructions if it finds
+neither. Nothing is downloaded automatically.
+
+`build-web.sh` is POSIX `sh` and avoids GNU-isms, so it runs on FreeBSD as well —
+including hashing the C sources, where it falls back through `sha256sum`,
+`shasum`, `sha256` and `openssl dgst`, since none of those is present everywhere
+(`shasum` in particular comes from Perl and is not in FreeBSD's base system).
 
 ## How the C compiles unchanged
 

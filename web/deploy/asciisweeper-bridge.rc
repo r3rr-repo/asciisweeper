@@ -1,0 +1,98 @@
+#!/bin/sh
+#
+# FreeBSD rc.d script for the asciisweeper multiplayer WebSocket bridge.
+#
+# Install:
+#   install -m 555 asciisweeper-bridge.rc /usr/local/etc/rc.d/asciisweeper_bridge
+#
+# Configure in /etc/rc.conf (or /etc/rc.conf.d/asciisweeper_bridge):
+#
+#   asciisweeper_bridge_enable="YES"
+#   asciisweeper_bridge_servername="yourdomain.com"
+#
+# then:
+#   service asciisweeper_bridge start
+#   service asciisweeper_bridge status
+#
+# asciisweeper_bridge_servername is almost always required: Node verifies the
+# game server's certificate against servername || host, so connecting to
+# 127.0.0.1 without it checks the certificate against the IP address, which a
+# certificate issued for a domain name does not cover. Setting _ca instead does
+# NOT help. See README.md in this directory.
+#
+# PROVIDE: asciisweeper_bridge
+# REQUIRE: LOGIN NETWORKING
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="asciisweeper_bridge"
+rcvar="asciisweeper_bridge_enable"
+desc="asciisweeper multiplayer WebSocket bridge"
+
+load_rc_config "$name"
+
+: ${asciisweeper_bridge_enable:="NO"}
+: ${asciisweeper_bridge_user:="www"}
+: ${asciisweeper_bridge_node:="/usr/local/bin/node"}
+: ${asciisweeper_bridge_dir:="/usr/local/share/asciisweeper/web/bridge"}
+: ${asciisweeper_bridge_bind:="127.0.0.1"}
+: ${asciisweeper_bridge_listen:="8080"}
+: ${asciisweeper_bridge_upstream:="127.0.0.1:4443"}
+: ${asciisweeper_bridge_servername:=""}
+: ${asciisweeper_bridge_ca:=""}
+: ${asciisweeper_bridge_logfile:="/var/log/asciisweeper-bridge.log"}
+
+pidfile="/var/run/${name}.pid"
+
+# rc.subr matches the running process by procname, which for a Node service is
+# the interpreter rather than the script.
+procname="${asciisweeper_bridge_node}"
+command="/usr/sbin/daemon"
+
+start_precmd="asciisweeper_bridge_precmd"
+
+asciisweeper_bridge_precmd()
+{
+	if [ ! -x "${asciisweeper_bridge_node}" ]; then
+		err 1 "node not found at ${asciisweeper_bridge_node} (pkg install node; or set asciisweeper_bridge_node)"
+	fi
+	if [ ! -f "${asciisweeper_bridge_dir}/bridge.mjs" ]; then
+		err 1 "bridge.mjs not found in ${asciisweeper_bridge_dir} (set asciisweeper_bridge_dir)"
+	fi
+	# The bridge's one runtime dependency. Installed with:
+	#   cd <repo>/web && npm ci --omit=dev
+	if [ ! -d "${asciisweeper_bridge_dir}/../node_modules/ws" ]; then
+		warn "ws not found under ${asciisweeper_bridge_dir}/../node_modules - run 'npm ci --omit=dev' in the web directory"
+	fi
+
+	install -o "${asciisweeper_bridge_user}" -g "${asciisweeper_bridge_user}" \
+		-m 640 /dev/null "${asciisweeper_bridge_logfile}" 2>/dev/null || true
+
+	_bridge_args="--bind ${asciisweeper_bridge_bind}"
+	_bridge_args="${_bridge_args} --listen ${asciisweeper_bridge_listen}"
+	_bridge_args="${_bridge_args} --upstream ${asciisweeper_bridge_upstream}"
+	[ -n "${asciisweeper_bridge_servername}" ] && \
+		_bridge_args="${_bridge_args} --servername ${asciisweeper_bridge_servername}"
+	[ -n "${asciisweeper_bridge_ca}" ] && \
+		_bridge_args="${_bridge_args} --ca ${asciisweeper_bridge_ca}"
+
+	# daemon(8) does the backgrounding, pidfile, user drop and restart-on-exit
+	# that systemd would otherwise handle.
+	#   -f  redirect stdio away from the terminal
+	#   -r  restart if it exits
+	#   -P  supervisor pidfile, -p child pidfile
+	#   -u  run as an unprivileged user
+	#   -o  append output to a log file
+	# A local name, NOT rc_flags - that one belongs to rc.subr, which passes it
+	# to $command separately.
+	#
+	# daemon's -t title must be a single word: command_args is word-split when
+	# rc.subr invokes $command, so a title containing spaces would spill over and
+	# be taken as the command to run.
+	_daemon_args="-f -r -t ${name} -P /var/run/${name}.supervisor.pid -p ${pidfile}"
+	_daemon_args="${_daemon_args} -u ${asciisweeper_bridge_user} -o ${asciisweeper_bridge_logfile}"
+	command_args="${_daemon_args} ${asciisweeper_bridge_node} ${asciisweeper_bridge_dir}/bridge.mjs ${_bridge_args}"
+}
+
+run_rc_command "$1"
