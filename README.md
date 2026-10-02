@@ -134,7 +134,7 @@ multiplayer modes.
 
 ```sh
 ./build-web.sh          # -> web/dist/, static files, copy to a docroot
-./build-web.sh --serve  # dev server
+./build-web.sh --serve  # dev server, for playing locally
 ./build-web.sh --test   # typecheck + 637 tests
 ```
 
@@ -146,10 +146,154 @@ trick is a fake `<openssl/ssl.h>` on the wasm build's include path, which lets
 `net_io.c` compile without its five TLS framing functions — see
 [`web/README.md`](web/README.md).
 
-Multiplayer needs one extra process, because browsers cannot open raw TLS
-sockets: [`web/bridge/bridge.mjs`](web/bridge/bridge.mjs) relays bytes between a
-WebSocket and `asciisweeper-server`. It never parses the protocol, so the server
-is unchanged and a browser player can be matched against a terminal player.
+### Requirements
+
+Building the browser client needs **Node 18+** and nothing else:
+`web/wasm/core.wasm` is committed, so the WebAssembly toolchain is only needed if
+you change the C it is built from. If you do, `build-web.sh` says so and stops
+rather than shipping a stale one, and you will want:
+
+```sh
+brew install llvm lld wasi-libc wasi-runtimes     # ~79 MB
+# or a wasi-sdk at $WASI_SDK, /opt/wasi-sdk or ~/.wasi-sdk
+```
+
+## Hosting the browser version
+
+Single-player is pure static files. Multiplayer additionally needs one small
+process on the same host as `asciisweeper-server`, because browsers cannot open
+raw TLS sockets. The game server itself is **not** modified, reconfigured or
+restarted — same binary, same port, same certificate.
+
+[`web/deploy/README.md`](web/deploy/README.md) is the fuller reference, with a
+troubleshooting table. The steps below are the whole job.
+
+### 1. Build, on your workstation
+
+```sh
+./build-web.sh
+```
+
+That produces `web/dist/` — three files, about 60 KB in total:
+
+```
+index.html                 3.8 KB
+assets/index-<hash>.js      46 KB   client, renderer and the ncurses shim
+assets/core-<hash>.wasm     11 KB   board.c + net_io.c
+```
+
+Asset paths are relative, so it works at a domain root or in a subdirectory like
+`/games/sweeper/`. No font is bundled: the glyph atlas is rasterised at runtime
+from a system monospace font, so the exact typeface follows the viewer's machine
+(`Menlo` and `SF Mono` first, then generic fallbacks).
+
+### 2. Copy the static files to the docroot
+
+```sh
+rsync -av --delete web/dist/ youruser@yourhost:/var/www/sweeper/
+```
+
+Copy **`web/dist/`, not `web/`**. The source tree needs a bundler — browsers
+cannot execute TypeScript — so serving `web/` as static files cannot work. (It
+will tell you so if you try it.)
+
+Single-player works at this point. Everything below is for multiplayer.
+
+### 3. Serve it, and serve `.wasm` correctly
+
+Any static web server will do. The one thing to check is that `.wasm` is sent as
+`application/wasm`; Caddy already does, and older nginx needs:
+
+```nginx
+types { application/wasm wasm; }
+```
+
+Without it the page still works, via a slower fallback path.
+
+### 4. Put the bridge on the server host
+
+```sh
+ssh youruser@yourhost
+cd /opt/asciisweeper && git pull origin main
+cd web && npm ci --omit=dev          # installs exactly one package: ws
+```
+
+Vite and TypeScript are devDependencies and are deliberately not installed on a
+server. Run this from inside `web/`, not with `npm --prefix web`, which resolves
+against the current directory.
+
+### 5. Choose the bridge's upstream TLS flags
+
+**This is the step that bites.** Node verifies the game server's certificate
+against `servername || host`, so connecting to `127.0.0.1` without `--servername`
+checks the certificate against the *IP address* — which a certificate issued for
+a domain name does not cover. Passing `--ca` does not help; the identity check
+still uses the host.
+
+| The game server's certificate is... | Flags |
+|--------------------------------------|-------|
+| Issued for a domain (Let's Encrypt)  | `--upstream 127.0.0.1:4443 --servername yourdomain.com` |
+| Signed by a private CA               | `--upstream 127.0.0.1:4443 --servername <name in cert> --ca /path/ca.pem` |
+| Self-signed **with** `IP:127.0.0.1` in its SANs | `--upstream 127.0.0.1:4443 --ca /path/server.crt` |
+
+With a publicly valid certificate, `--ca` is unnecessary — the system trust store
+covers it. The bridge prints a note at startup if it sees an IP upstream with no
+`--servername`.
+
+### 6. Install the service
+
+```sh
+sudo cp /opt/asciisweeper/web/deploy/asciisweeper-bridge.service /etc/systemd/system/
+sudoedit /etc/systemd/system/asciisweeper-bridge.service   # User, paths, step-5 flags
+sudo systemctl daemon-reload
+sudo systemctl enable --now asciisweeper-bridge
+```
+
+The bridge binds to loopback only; the reverse proxy reaches it locally, so
+nothing new is exposed to the internet.
+
+### 7. Route `/ws` through the reverse proxy
+
+Copy the relevant part of
+[`web/deploy/Caddyfile.example`](web/deploy/Caddyfile.example) or
+[`web/deploy/nginx.conf.example`](web/deploy/nginx.conf.example). Two things have
+to be right:
+
+- **`/ws` is matched before the static file handler**, or the WebSocket upgrade
+  gets served as a 404.
+- **The read timeout is generous.** nginx defaults `proxy_read_timeout` to 60s,
+  which is *shorter* than the game server's own 90s idle disconnect — and a
+  turn-based game sends nothing at all while someone is thinking. Without a
+  longer timeout, an opponent who takes a minute gets dropped for no reason. The
+  examples set 1h; Caddy has no read timeout by default, which is what you want.
+
+```sh
+sudo nginx -t && sudo systemctl reload nginx    # or caddy validate && systemctl reload caddy
+```
+
+### 8. Verify
+
+```sh
+# on the host - the bridge is up
+curl -s http://127.0.0.1:8080/healthz                              # -> ok
+
+# from anywhere - TLS and the static files
+curl -s -o /dev/null -w '%{http_code}\n' https://yourdomain.com/   # -> 200
+
+# the real proof: two clients through the deployed bridge into the deployed
+# server, speaking the actual protocol
+BRIDGE_URL=wss://yourdomain.com/ws node web/test/mp.e2e.mjs        # -> 34 passed
+```
+
+Watch the bridge while testing with
+`journalctl -u asciisweeper-bridge -f`. A healthy connection logs
+`open from <ip>` then `upstream connected`. If you see
+`Hostname/IP does not match certificate's altnames`, go back to step 5.
+
+Players do not have to type an address: the client derives `wss://host/ws` from
+the page's own origin, so the multiplayer menu asks only for a name. Because
+matchmaking is FIFO and client-agnostic, a browser player and a terminal player
+are paired with each other and play the same board.
 
 ## How it works
 

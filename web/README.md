@@ -65,18 +65,24 @@ browser --wss--> Caddy/nginx --ws (loopback)--> bridge --TLS (pinned)--> asciisw
 ```
 
 The proxy terminates TLS for both the site and `/ws` with the certificate you
-already have, so the bridge does none itself. Upstream it pins the game server's
-certificate with `--ca`, exactly as the native client does — the job a browser
-cannot do, since it cannot pin a CA.
+already have, so the bridge does none itself. Upstream it verifies the game
+server's certificate — the job a browser cannot do, since it cannot pin a CA.
+Note that this needs `--servername` as well as (or instead of) `--ca` whenever the
+certificate is issued for a domain name but reached over loopback;
+[`deploy/README.md`](deploy/README.md) explains why.
 
 Because the site and the bridge are same-origin, the client derives
-`wss://host/ws` from `location`; there is no address to type. See `deploy/` for a
-Caddyfile, an nginx snippet and a systemd unit.
+`wss://host/ws` from `location`; there is no address to type.
 
-**One deployment trap:** nginx's default `proxy_read_timeout` is 60s, shorter
-than the server's own 90s idle disconnect. A turn-based game is quiet by design,
-so an opponent thinking for a minute would be dropped for no reason. The examples
-in `deploy/` set it generously.
+**To host this**, follow "Hosting the browser version" in the
+[main README](../README.md). `deploy/` holds the systemd unit, the Caddy and nginx
+snippets, and [a reference](deploy/README.md) covering the certificate detail and
+a troubleshooting table.
+
+**One deployment trap worth knowing up front:** nginx's default
+`proxy_read_timeout` is 60s, shorter than the server's own 90s idle disconnect. A
+turn-based game is quiet by design, so an opponent thinking for a minute would be
+dropped for no reason. The examples in `deploy/` set it generously.
 
 ### Local testing
 
@@ -145,7 +151,7 @@ web/
   src/game/*.ts              ports of play_game / play_multiplayer, as state machines
   src/net/wsconn.ts          WebSocket + protocol frame reassembly
   bridge/bridge.mjs          WebSocket -> TLS byte pipe
-  deploy/                    Caddyfile, nginx snippet, systemd unit
+  deploy/                    systemd unit, Caddy + nginx snippets, deploy reference
   test/                      637 tests, no browser or GPU needed
 ```
 

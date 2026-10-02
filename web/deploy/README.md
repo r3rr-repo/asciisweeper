@@ -1,163 +1,104 @@
-# Deploying the browser client
+# Deployment reference
 
-Two pieces, and they are independent:
+**The step-by-step sequence lives in the main [README](../../README.md), under
+"Hosting the browser version."** This file is the reference behind it: the
+certificate detail in full, a troubleshooting table, and notes on the files here.
+Keeping the steps in one place stops the two from drifting.
 
-| | What | Needs |
-|---|---|---|
-| **Single-player** | the contents of `web/dist/` in a docroot | nothing else |
-| **Multiplayer** | the bridge process + a `/ws` proxy route | Node on the host |
+## Files
 
-The game server is **not** modified or restarted. Same binary, same `:4443`, same
-certificate. Multiplayer needs the bridge only because a browser cannot open a raw
-TLS socket, so something on that host has to relay bytes to `127.0.0.1:4443`.
+| File | Purpose |
+|---|---|
+| `asciisweeper-bridge.service` | systemd unit for the bridge. Edit `User`, `WorkingDirectory` and the upstream flags. |
+| `Caddyfile.example` | Caddy: static files plus the `/ws` route. |
+| `nginx.conf.example` | nginx equivalent, including the `.wasm` media type and the read timeout. |
 
-Protocol compatibility is already settled: `src/server.c:857` requires an exact
-`NET_PROTO_VERSION` match, and the browser sends the same version from the same
-header as the terminal client. If `./build/asciisweeper` plays against your server
-today, the browser will too.
+## Why `--servername` is required
 
-## Prerequisites on the host
+This is the one configuration mistake that is easy to make and hard to read.
 
-- Node 18 or newer (`bridge.mjs` uses `node:`-prefixed imports).
-- `asciisweeper-server` already running on `:4443` with its certificate.
-- A reverse proxy already terminating TLS for the domain.
-- Knowing what kind of certificate the game server uses — it decides the bridge
-  flags, and it is the one step people get wrong. See step 4.
+Node verifies the upstream certificate against `servername || host`. The bridge
+connects to the game server over loopback, so with `--upstream 127.0.0.1:4443`
+and no `--servername`, Node checks the certificate against the **IP address**. A
+certificate issued for a domain name has no IP SAN, so the handshake fails:
 
-## 1. Get the code onto the host
+```
+upstream error: Hostname/IP does not match certificate's altnames:
+    IP: 127.0.0.1 is not in the cert's list:
+```
+
+**`--ca` does not fix this.** Supplying the CA changes which chain is trusted; it
+does not change which name is checked. The identity check still uses the host.
+
+The fix is to tell Node the name the certificate was issued for, while still
+connecting to loopback:
 
 ```sh
-cd /opt/asciisweeper && git pull origin main
+node bridge.mjs --listen 8080 --upstream 127.0.0.1:4443 --servername yourdomain.com
 ```
 
-## 2. Install the bridge's one runtime dependency
+### Why local testing does not catch it
 
-```sh
-cd /opt/asciisweeper/web && npm ci --omit=dev
-```
-
-`ws` is the only entry in `dependencies`; Vite and TypeScript are devDependencies
-and are deliberately not installed on a server.
-
-Run it from inside `web/`, not with `npm --prefix web`, which resolves against the
-current directory and silently installs in the wrong place from anywhere else.
-
-## 3. Build the static files on your workstation, then copy them
-
-The host has no build toolchain after step 2, which is intentional:
-
-```sh
-# on your workstation
-./build-web.sh
-rsync -av --delete web/dist/ youruser@yourhost:/var/www/sweeper/
-```
-
-Copy **`web/dist/`, not `web/`**. The source tree needs a bundler — browsers
-cannot execute TypeScript — so serving `web/` as static files cannot work. (It
-will tell you so if you try.) `dist/` is self-contained and its asset paths are
-relative, so it works at a domain root or in a subdirectory like
-`/games/sweeper/`.
-
-## 4. Choose the upstream flags
-
-**This is the step to read twice.** Node verifies the upstream certificate against
-`servername || host`, so dialling `127.0.0.1` with no `--servername` checks the
-certificate against the *IP address*. A certificate issued for a domain name has
-no IP SAN, and the handshake fails with:
+The self-signed certificate in the main README's local-testing recipe is created
+with:
 
 ```
-upstream error: Hostname/IP does not match certificate's altnames
+-addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
 ```
 
-**`--ca` does not fix that** — the identity check still uses the host.
+That `IP:127.0.0.1` is why `--ca server.crt` alone succeeds locally — the
+certificate really does cover the IP being connected to. A Let's Encrypt
+certificate does not, which is why the same flags fail in production. The bridge
+prints a note at startup when it sees an IP upstream with no `--servername`, to
+surface this before a player hits it.
+
+### Flag combinations
 
 | The game server's certificate is... | Flags |
 |---|---|
 | Issued for a domain (Let's Encrypt etc.) | `--upstream 127.0.0.1:4443 --servername yourdomain.com` |
 | Signed by a private CA | `--upstream 127.0.0.1:4443 --servername <name in cert> --ca /path/ca.pem` |
 | Self-signed **with** `IP:127.0.0.1` in its SANs | `--upstream 127.0.0.1:4443 --ca /path/server.crt` |
+| Local development, any certificate | `--upstream 127.0.0.1:4443 --insecure` |
 
-With a publicly valid certificate, `--ca` is unnecessary — the system trust store
-covers it. Adding it pins more tightly, which is fine, but `--servername` is still
-required. The bridge prints a note at startup if it sees an IP upstream with no
-`--servername`.
+`--insecure` skips upstream verification entirely and prints a warning. It is for
+development only: the bridge's upstream hop exists precisely to do the
+certificate pinning a browser cannot.
 
-The third row is what the main README's local-testing recipe produces, because
-that `openssl req` puts `IP:127.0.0.1` in `subjectAltName`. That is exactly why
-local testing succeeds with `--ca` alone while a real deployment often does not.
+## Why the read timeout matters
 
-## 5. Install the service
+A turn-based game is silent while a player thinks. nginx defaults
+`proxy_read_timeout` to 60 seconds, which is **shorter than the game server's own
+90-second idle disconnect** (`src/server.c`), so an opponent who deliberates for a
+minute is dropped by the proxy rather than by the game. `nginx.conf.example` sets
+one hour. Caddy has no read timeout by default, which is already correct.
 
-```sh
-sudo cp /opt/asciisweeper/web/deploy/asciisweeper-bridge.service /etc/systemd/system/
-sudoedit /etc/systemd/system/asciisweeper-bridge.service    # User, paths, step-4 flags
-sudo systemctl daemon-reload
-sudo systemctl enable --now asciisweeper-bridge
-systemctl status asciisweeper-bridge
-```
-
-The unit binds the bridge to loopback only, since the proxy reaches it locally.
-Nothing new is exposed to the internet.
-
-## 6. Route /ws through the proxy
-
-Copy the relevant part of `Caddyfile.example` or `nginx.conf.example`. Two things
-have to be right:
-
-- **`/ws` is matched before the static file handler**, or the upgrade request gets
-  served as a 404.
-- **The read timeout is generous.** nginx defaults `proxy_read_timeout` to 60s,
-  which is *shorter* than the game server's own 90s idle disconnect — and a
-  turn-based game sends nothing at all while someone is thinking. Without a longer
-  timeout, an opponent who takes a minute gets dropped for no reason. The examples
-  set 1h. Caddy has no read timeout by default, which is what you want.
-
-Then:
-
-```sh
-sudo nginx -t && sudo systemctl reload nginx     # or: caddy validate && systemctl reload caddy
-```
-
-## 7. Verify, in increasing order of realism
-
-```sh
-# on the host - the bridge is up
-curl -s http://127.0.0.1:8080/healthz                              # -> ok
-
-# from anywhere - TLS and the static files
-curl -s -o /dev/null -w '%{http_code}\n' https://yourdomain.com/   # -> 200
-
-# the real proof: two clients through the DEPLOYED bridge into the DEPLOYED
-# server, using the same wasm codec the browser uses
-BRIDGE_URL=wss://yourdomain.com/ws node web/test/mp.e2e.mjs        # -> 34 passed
-```
-
-That last command is the one that actually tells you multiplayer works. It queues
-two players on the live server for a few seconds, so run it when nobody is waiting
-for a match.
-
-Watch the bridge while testing:
-
-```sh
-journalctl -u asciisweeper-bridge -f
-```
-
-A healthy connection logs `open from <ip>` and then `upstream connected`. If you
-see `upstream error: Hostname/IP does not match certificate's altnames`, go back
-to step 4.
-
-Finally, the human check: open the site, choose Multiplayer, and have someone join
-with the terminal client from another machine. They are matched FIFO, so a browser
-player and a terminal player get paired with each other and should see an
-identical board.
+The client also sends `MSG_PING` every 25 seconds, which helps — but do not rely
+on it instead of the timeout. That message type was defined in the protocol from
+the start and never used by the terminal client; it earns its keep in the browser
+because JavaScript cannot send WebSocket control-frame pings.
 
 ## Troubleshooting
 
 | Symptom | Cause |
 |---|---|
 | Page stuck on "loading…", console 404 on a `.ts` file | `web/` was deployed instead of `web/dist/` |
-| `.wasm` served as `application/octet-stream` | older nginx without the wasm media type; add `types { application/wasm wasm; }`. It still works via a slower fallback path |
-| Multiplayer says "connection failed" immediately | bridge not running, or `/ws` not routed |
-| Bridge logs `Hostname/IP does not match certificate's altnames` | missing `--servername`; step 4 |
-| Matches die after about a minute of thinking | proxy `proxy_read_timeout` too low; step 6 |
+| `.wasm` served as `application/octet-stream` | older nginx without the wasm media type; add `types { application/wasm wasm; }`. The page still works, via a slower fallback |
+| Multiplayer reports "connection failed" immediately | bridge not running, or `/ws` not routed |
+| Bridge logs `Hostname/IP does not match certificate's altnames` | missing `--servername` — see above |
+| WebSocket upgrade returns 404 | `/ws` is matched after the static file handler; move it before |
+| Matches die after about a minute of thinking | proxy read timeout too low |
 | Server rejects with "unsupported protocol version" | the deployed `asciisweeper-server` predates the client's `NET_PROTO_VERSION`; rebuild and restart it |
+
+## Verifying a deployment
+
+```sh
+curl -s http://127.0.0.1:8080/healthz                          # on the host -> ok
+BRIDGE_URL=wss://yourdomain.com/ws node web/test/mp.e2e.mjs    # -> 34 passed
+journalctl -u asciisweeper-bridge -f                           # open from <ip>, upstream connected
+```
+
+The middle one is the real check: it drives two clients through the deployed
+bridge into the deployed server using the same wasm codec the browser uses. It
+queues two players on the live server for a few seconds, so run it when nobody is
+waiting for a match.
