@@ -19,9 +19,12 @@ const eq = <T>(a: T, b: T, m: string) => ok(a === b, `${m} (got ${JSON.stringify
 /** The multiplayer screen: 16x16 board, avatars either side. */
 const MP_H = 16;
 const MP_COLS_NEEDED = 16 * 2 + 2 + 2 * (12 + 2); // 62
-const MP_EXTRA = 6;
-/** The chat composer, the deepest thing multiplayer draws (draw/mp.ts). */
-const deepestMpRow = (top: number) => top + MP_H + 9;
+const MP_EXTRA = 7;
+/**
+ * The deepest thing multiplayer draws: on the end screen the chat log starts at
+ * +7 and the composer sits below it at +10.
+ */
+const deepestMpRow = (top: number) => top + MP_H + 10;
 
 const SCREENS: [string, number, number, number][] = [
   ["MacBook Air 13in", 1512, 860, 2],

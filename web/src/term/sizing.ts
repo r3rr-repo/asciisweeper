@@ -29,14 +29,14 @@ export const DESIRED_COLS = 80;
 /**
  * Rows targeted by default, and the range the zoom control may reach.
  *
- * The lower bound is not cosmetic. The multiplayer screen needs 30 rows for its
- * block (16 board + 8 chrome + 6 reserved for status and chat), so allowing a
- * smaller target would let someone zoom straight back into the clipped-chat bug
- * this sizing exists to fix. Zooming in is capped there rather than letting the
- * layout break quietly.
+ * The lower bound is not cosmetic. The multiplayer screen needs 31 rows for its
+ * block (16 board + 8 chrome + 7 reserved for the end-of-match result, chat log
+ * and composer), so allowing a smaller target would let someone zoom straight
+ * back into the clipped-chat bug this sizing exists to fix. Zooming in is capped
+ * there rather than letting the layout break quietly.
  */
 export const DEFAULT_TARGET_ROWS = 32;
-export const MIN_TARGET_ROWS = 30;
+export const MIN_TARGET_ROWS = 31;
 export const MAX_TARGET_ROWS = 48;
 
 /** Never shrink a cell below this many device pixels; glyphs stop being legible. */

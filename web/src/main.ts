@@ -445,7 +445,7 @@ class App {
       }
 
       case "single": this.mode.game.onKey(k, now); return;
-      case "multi": this.mode.game.onKey(k, now); return;
+      case "multi": this.mode.game.onKey(k); return;
       case "testcard":
         if (k.name === "escape") this.mode = { kind: "menu", sel: 0 };
         return;

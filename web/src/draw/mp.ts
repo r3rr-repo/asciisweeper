@@ -98,9 +98,14 @@ export function drawAvatarPanels(
   });
 }
 
-/** src/main.c:572-599 */
-export function drawChat(s: Surface, v: MpView): void {
-  const row = v.board.top + v.board.h + 6;
+/**
+ * src/main.c:572-599.
+ *
+ * `rowOffset` shifts the log down on the end-of-match screen, which draws two
+ * lines of its own at +5..+6 where the log would otherwise start.
+ */
+export function drawChat(s: Surface, v: MpView, rowOffset = 0): void {
+  const row = v.board.top + v.board.h + 6 + rowOffset;
   s.withAttrs(CP_HUD, false, () => {
     v.chatLog.forEach((line, i) => {
       if (row + i < s.rows) {
@@ -121,7 +126,7 @@ export function drawChat(s: Surface, v: MpView): void {
 
 /** src/main.c:601-616 */
 export function renderMultiplayer(
-  s: Surface, v: MpView, blinks: [Blink, Blink], nowMs: number,
+  s: Surface, v: MpView, blinks: [Blink, Blink], nowMs: number, chatRowOffset = 0,
 ): void {
   s.erase();
   drawMpHud(s, v);
@@ -135,5 +140,5 @@ export function renderMultiplayer(
       s.clrtoeol(v.board.top + v.board.h + 5, v.board.left + v.statusLine.length);
     });
   }
-  drawChat(s, v);
+  drawChat(s, v, chatRowOffset);
 }

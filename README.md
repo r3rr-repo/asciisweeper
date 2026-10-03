@@ -68,6 +68,7 @@ This also builds `build/asciisweeper-server`, the multiplayer server binary.
 | `Space` / `Enter`    | Reveal the selected cell                  |
 | `f`                  | Flag / unflag the selected cell           |
 | `c`                  | Chord: reveal neighbors of a satisfied number |
+| `t`                  | Multiplayer only: chat, during a match and after it |
 | `r`                  | Restart with the same settings            |
 | `n`                  | Return to the menu                        |
 | `q`                  | Quit                                      |
@@ -125,6 +126,11 @@ as the CA file.
 If your connection drops mid-match, the client automatically tries to
 reconnect using your session token for up to 60 seconds before giving up
 and returning to the menu.
+
+When a match ends you stay on the result screen for as long as you like —
+chat with `t`, offer a rematch with `r`. There is no countdown: the screen
+ends when a player leaves, or when one goes completely silent for 90
+seconds, which is what stops a dropped connection holding a match open.
 
 ## Browser version
 

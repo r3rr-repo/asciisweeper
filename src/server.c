@@ -38,7 +38,6 @@
 #define HELLO_TIMEOUT_SECONDS      10
 #define IDLE_DISCONNECT_SECONDS    90  /* total silence before treating a connection as dead */
 #define RECONNECT_GRACE_SECONDS    60
-#define REMATCH_WAIT_SECONDS       20
 /* Per-IP throttling blunts a single actor flooding the queue with fake
  * players, without punishing two legitimate players who happen to share
  * a NAT/public IP and queue up close together in time - bounding how many
@@ -688,13 +687,20 @@ static void send_match_start(Connection *conn, Match *m, int player_index)
 }
 
 /* Called after play_match() returns true (the match concluded with this
- * connection still live). Gives this player up to REMATCH_WAIT_SECONDS to
- * request a rematch and for the opponent to do the same; the match is
- * reset in place (same Match/slots/session tokens, fresh board and scores)
- * the moment both have asked. Returns true if a new round is ready to
- * play (caller should send a fresh MATCH_START and loop back into
- * play_match), false if there's no rematch (declined, timed out, or the
- * opponent isn't connected to ask). */
+ * connection still live). Players stay here talking and deciding for as long
+ * as they like: the match is reset in place (same Match/slots/session tokens,
+ * fresh board and scores) the moment both have asked for a rematch.
+ *
+ * There is deliberately no fixed deadline - an end-of-match screen that throws
+ * you out mid-sentence is the thing this replaced. What bounds it instead is
+ * silence: a player who sends nothing at all for IDLE_DISCONNECT_SECONDS is
+ * treated as gone, so a half-open socket (a slept laptop, a network that
+ * dropped without a FIN) cannot hold a Match and two connection slots forever.
+ * Both clients send MSG_PING on this screen to say they are still watching.
+ *
+ * Returns true if a new round is ready to play (caller should send a fresh
+ * MATCH_START and loop back into play_match), false if there's no rematch
+ * (the opponent left, this socket died, or this player went silent). */
 static bool try_rematch(Connection *conn, Match *m, int player_index)
 {
     pthread_mutex_lock(&m->lock);
@@ -702,9 +708,10 @@ static bool try_rematch(Connection *conn, Match *m, int player_index)
     m->rematch_wanted[player_index] = false; /* a fresh ask is needed each round */
     pthread_mutex_unlock(&m->lock);
 
-    time_t deadline = time(NULL) + REMATCH_WAIT_SECONDS;
+    /* Refreshed by every frame this player sends, including pings. */
+    time_t idle_deadline = time(NULL) + IDLE_DISCONNECT_SECONDS;
 
-    while (time(NULL) < deadline) {
+    while (time(NULL) < idle_deadline) {
         bool just_reset = false;
         char name0[NET_MAX_NAME_LEN + 1], name1[NET_MAX_NAME_LEN + 1];
 
@@ -742,18 +749,29 @@ static bool try_rematch(Connection *conn, Match *m, int player_index)
         if (r != NET_OK)
             return false;
 
+        /* Anything at all proves the player is still there. */
+        idle_deadline = time(NULL) + IDLE_DISCONNECT_SECONDS;
+
         if (frame.type == MSG_REQUEST_REMATCH) {
             pthread_mutex_lock(&m->lock);
             m->rematch_wanted[player_index] = true;
             pthread_mutex_unlock(&m->lock);
             continue;
         }
+        if (frame.type == MSG_CHAT) {
+            /* Same relay as during the match: saying "gg" is most of the point
+             * of an end-of-match screen. */
+            relay_chat(m, player_index, frame.payload, frame.len);
+            continue;
+        }
         if (frame.type == MSG_PING) {
             net_send_frame(conn->ssl, MSG_PONG, NULL, 0);
             continue;
         }
-        /* ignore anything else (e.g. a stray chat line) while deciding */
+        /* ignore anything else (an action for a match that is over) */
     }
+
+    log_line("%s went silent on the end-of-match screen", conn->name);
     return false;
 }
 

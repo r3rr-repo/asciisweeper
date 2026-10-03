@@ -21,6 +21,7 @@ const URL_ = process.env.BRIDGE_URL ?? "ws://127.0.0.1:8080/ws";
 const MSG = {
   HELLO: 0x01, ACTION_REVEAL: 0x03, ACTION_FLAG: 0x04, ACTION_CHORD: 0x05,
   PING: 0x06, CHAT: 0x07,
+  REQUEST_REMATCH: 0x08,
   WELCOME: 0x81, QUEUE_STATUS: 0x82, MATCH_START: 0x83, BOARD_STATE: 0x84,
   TURN: 0x85, MATCH_END: 0x87, ERROR: 0x88, PONG: 0x8a, CHAT_RECV: 0x8b,
 };
@@ -126,6 +127,8 @@ class Client {
 }
 
 const REVEALED = 0x80, FLAGGED = 0x40;
+
+const settle = (ms) => new Promise((res) => setTimeout(res, ms));
 
 try {
   console.log(`connecting two clients to ${URL_}`);
@@ -261,6 +264,92 @@ try {
   a.send(MSG.PING, new Uint8Array(0));
   const pong = await a.expect(MSG.PONG);
   ok(pong.payload.length === 0, "PING is answered with an empty PONG");
+
+  // ---- play to a finish --------------------------------------------------
+  // Strictly turn-by-turn, the way real clients behave. An earlier version of
+  // this test fired reveals from both clients at once and tripped a
+  // PRE-EXISTING race in the server: broadcast_board_state sends outside the
+  // match lock with no per-connection write mutex, so two threads can call
+  // net_send_frame on the same SSL* and OpenSSL raises "tlsv1 alert internal
+  // error". Not introduced here, but worth knowing it is reachable.
+  const drainTurn = (cl, core) => {
+    const ix = cl.frames.map((f) => f.type).lastIndexOf(MSG.TURN);
+    if (ix < 0) return null;
+    const fr = cl.frames.splice(ix, 1)[0];
+    return cl.rxFrame(fr) ? core.core_turn_player() : null;
+  };
+  const sawEnd = (cl) => cl.frames.some((f) => f.type === MSG.MATCH_END);
+
+  let turn = second;              // the reveal above already passed the turn
+  let ended = false;
+  for (let i = 0; i < 300 && !ended; i++) {
+    const x = i % 16, y = ((i / 16) | 0) % 16;
+    const [cl, core] = turn === idA ? [a, coreA] : [b, coreB];
+    cl.send(MSG.ACTION_REVEAL, packed(core, core.core_pack_action_reveal(x, y)));
+    await settle(30);
+    if (sawEnd(a) || sawEnd(b)) { ended = true; break; }
+    const t = drainTurn(a, coreA) ?? drainTurn(b, coreB);
+    if (t !== null) turn = t;
+  }
+  ok(ended, "played the match through to MATCH_END");
+
+  // Both sides must have seen it before the end screen is meaningful.
+  await a.expect(MSG.MATCH_END, 4000);
+  await b.expect(MSG.MATCH_END, 4000);
+
+  // ---- the behaviour this change exists for -------------------------------
+  // Before this, src/server.c dropped chat during the rematch window with
+  // "ignore anything else (e.g. a stray chat line) while deciding".
+  a.frames.length = 0; b.frames.length = 0;
+  const gg = coreA.core_in_ptr();
+  new Uint8Array(coreA.memory.buffer).set(new TextEncoder().encode("gg wp\0"), gg);
+  a.send(MSG.CHAT, packed(coreA, coreA.core_pack_chat(gg)));
+  const endChat = await b.expect(MSG.CHAT_RECV, 5000);
+  ok(b.rxFrame(endChat), "chat sent AFTER the match ends is decoded by the opponent");
+  eq(readName(coreB, coreB.core_chat_text()), "gg wp", "end-of-match chat relays intact");
+
+  // And back the other way, so it is not one-directional.
+  const re = coreB.core_in_ptr();
+  new Uint8Array(coreB.memory.buffer).set(new TextEncoder().encode("gg\0"), re);
+  b.send(MSG.CHAT, packed(coreB, coreB.core_pack_chat(re)));
+  const back = await a.expect(MSG.CHAT_RECV, 5000);
+  ok(a.rxFrame(back), "and in the other direction");
+
+  // ---- the idle guard releases a player who truly leaves ------------------
+  // Opt-in, because against the real 90 s constant it would take 90 s. Run it
+  // against a server built with a short IDLE_DISCONNECT_SECONDS:
+  //   IDLE_GUARD_TEST_MS=9000 node test/mp.e2e.mjs
+  if (process.env.IDLE_GUARD_TEST_MS) {
+    const quiet = Number(process.env.IDLE_GUARD_TEST_MS);
+    console.log(`  -- going completely silent for ${(quiet / 1000).toFixed(0)}s`);
+    let aClosed = false, bClosed = false;
+    a.ws.on("close", () => { aClosed = true; });
+    b.ws.on("close", () => { bClosed = true; });
+    await settle(quiet);
+    ok(aClosed && bClosed,
+      `a player who sends nothing at all is released (a=${aClosed} b=${bClosed}) - ` +
+      "so a half-open socket cannot hold a match forever");
+    console.log(`\n${pass} passed, ${fail} failed`);
+    process.exit(fail ? 1 : 0);
+  }
+
+  // ---- the window outlives the old 20 s deadline --------------------------
+  const WAIT_MS = Number(process.env.REMATCH_WAIT_TEST_MS ?? 25000);
+  console.log(`  -- idling ${(WAIT_MS / 1000).toFixed(0)}s on the end screen (old limit was 20s)`);
+  const pinger = setInterval(() => {
+    a.send(MSG.PING, new Uint8Array(0));
+    b.send(MSG.PING, new Uint8Array(0));
+  }, 5000);
+  await settle(WAIT_MS);
+  clearInterval(pinger);
+
+  a.frames.length = 0; b.frames.length = 0;
+  a.send(MSG.REQUEST_REMATCH, new Uint8Array(0));
+  b.send(MSG.REQUEST_REMATCH, new Uint8Array(0));
+  const againA = await a.expect(MSG.MATCH_START, 6000);
+  const againB = await b.expect(MSG.MATCH_START, 6000);
+  ok(a.rxFrame(againA) && b.rxFrame(againB),
+    `rematch still accepted after ${(WAIT_MS / 1000).toFixed(0)}s - the 20s window is gone`);
 
   a.close();
   b.close();

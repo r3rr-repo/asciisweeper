@@ -569,13 +569,14 @@ static void draw_avatar_panels(MPState *mp)
     attroff(COLOR_PAIR(CP_HUD));
 }
 
-static void draw_chat(MPState *mp)
+/* `row` is where the log starts: the in-match screen puts it just below the
+ * status line, the end-of-match screen two rows lower to clear its own text. */
+static void draw_chat(MPState *mp, int row)
 {
     int scr_h, scr_w;
     getmaxyx(stdscr, scr_h, scr_w);
     (void)scr_w;
 
-    int row = mp->g.top + mp->g.board.h + 6;
     int start = (mp->chat_log_next - mp->chat_log_count + CHAT_LOG_LINES) % CHAT_LOG_LINES;
 
     attron(COLOR_PAIR(CP_HUD));
@@ -598,7 +599,7 @@ static void draw_chat(MPState *mp)
     }
 }
 
-static void render_multiplayer(MPState *mp)
+static void render_multiplayer(MPState *mp, int chat_row)
 {
     erase();
     draw_mp_hud(mp);
@@ -611,15 +612,44 @@ static void render_multiplayer(MPState *mp)
         mvprintw(mp->g.top + mp->g.board.h + 5, mp->g.left, "%s", mp->status_line);
         attroff(COLOR_PAIR(CP_HUD) | A_BOLD);
     }
-    draw_chat(mp);
+    draw_chat(mp, chat_row);
     refresh();
+}
+
+/* The chat log's usual home, just under the status line. */
+#define MP_CHAT_ROW(mp) ((mp)->g.top + (mp)->g.board.h + 6)
+
+/* Handles one keypress while the chat composer is open. Shared by the in-match
+ * screen and the end-of-match screen so the two cannot drift apart. */
+static void mp_chat_key(MPState *mp, int ch)
+{
+    if (ch == 27) {
+        mp->chat_mode = false;
+    } else if (ch == '\n' || ch == KEY_ENTER) {
+        if (mp->chat_input_len > 0) {
+            MsgChat cm;
+            strncpy(cm.text, mp->chat_input, NET_CHAT_MSG_LEN);
+            cm.text[NET_CHAT_MSG_LEN] = '\0';
+            uint8_t cbuf[NET_MAX_PAYLOAD];
+            size_t cn = pack_chat(cbuf, &cm);
+            net_send_frame(mp->nc->ssl, MSG_CHAT, cbuf, cn);
+            chat_log_push(mp, mp->my_name, mp->chat_input);
+        }
+        mp->chat_mode = false;
+    } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
+        if (mp->chat_input_len > 0)
+            mp->chat_input[--mp->chat_input_len] = '\0';
+    } else if (ch >= 32 && ch < 127 && mp->chat_input_len < NET_CHAT_MSG_LEN) {
+        mp->chat_input[mp->chat_input_len++] = (char)ch;
+        mp->chat_input[mp->chat_input_len] = '\0';
+    }
 }
 
 /* Shows a message and waits briefly for a keypress or a short timeout. */
 static void mp_show_message(MPState *mp, const char *msg)
 {
     strncpy(mp->status_line, msg, sizeof(mp->status_line) - 1);
-    render_multiplayer(mp);
+    render_multiplayer(mp, MP_CHAT_ROW(mp));
     wtimeout(stdscr, 3000);
     getch();
 }
@@ -636,8 +666,19 @@ static AfterGame mp_show_end_screen(MPState *mp, MatchEndReason reason, bool *ou
     bool rematch_requested = false;
     bool can_rematch = (reason != END_OPPONENT_LEFT);
 
+    /* There is no deadline on this screen any more, so the server decides we
+     * have left if we go quiet. Say we are still here. Matches the browser
+     * client's interval; both are well inside IDLE_DISCONNECT_SECONDS. */
+    const long PING_INTERVAL_MS = 25000;
+    long last_ping_ms = monotonic_ms();
+
     while (1) {
-        render_multiplayer(mp);
+        if (monotonic_ms() - last_ping_ms >= PING_INTERVAL_MS) {
+            net_send_frame(mp->nc->ssl, MSG_PING, NULL, 0);
+            last_ping_ms = monotonic_ms();
+        }
+
+        render_multiplayer(mp, MP_CHAT_ROW(mp) + 1);
 
         const char *msg;
         int color;
@@ -659,11 +700,14 @@ static AfterGame mp_show_end_screen(MPState *mp, MatchEndReason reason, bool *ou
         clrtoeol();
         attron(COLOR_PAIR(CP_HUD));
         if (!can_rematch)
-            mvprintw(mp->g.top + mp->g.board.h + 6, mp->g.left, "[N]ew match  [Q]uit");
+            mvprintw(mp->g.top + mp->g.board.h + 6, mp->g.left, "Chat: t  |  [N]ew match  [Q]uit");
         else if (rematch_requested)
-            mvprintw(mp->g.top + mp->g.board.h + 6, mp->g.left, "Waiting for opponent to accept a rematch...  [Q]uit");
+            mvprintw(mp->g.top + mp->g.board.h + 6, mp->g.left,
+                     "Waiting for opponent to accept a rematch...  Chat: t  |  [Q]uit");
         else
-            mvprintw(mp->g.top + mp->g.board.h + 6, mp->g.left, "[R]ematch  [N]ew match  [Q]uit");
+            mvprintw(mp->g.top + mp->g.board.h + 6, mp->g.left,
+                     "[R]ematch  |  Chat: t  |  [N]ew match  [Q]uit");
+        clrtoeol();
         attroff(COLOR_PAIR(CP_HUD));
         refresh();
 
@@ -704,11 +748,30 @@ static AfterGame mp_show_end_screen(MPState *mp, MatchEndReason reason, bool *ou
                     return AFTER_MENU; /* ignored by the caller when *out_rematch is true */
                 }
             }
-            /* ignore anything else (e.g. a stray chat line) on this screen */
+            if (frame.type == MSG_CHAT_RECV) {
+                MsgChatRecv cr;
+                if (unpack_chat_recv(frame.payload, frame.len, &cr))
+                    chat_log_push(mp, mp->opponent_name, cr.text);
+            }
+            /* anything else (a PONG, a late action) is of no interest here */
         }
 
         if (r > 0 && FD_ISSET(term_fd, &rfds)) {
             int ch = getch();
+
+            if (mp->chat_mode) {
+                /* Composing swallows everything, so "quit" typed into a chat
+                 * line does not quit. Same rule as the in-match screen. */
+                mp_chat_key(mp, ch);
+                continue;
+            }
+
+            if (ch == 't' || ch == 'T') {
+                mp->chat_mode = true;
+                mp->chat_input[0] = '\0';
+                mp->chat_input_len = 0;
+                continue;
+            }
             if (ch == 'q' || ch == 'Q') { net_close(mp->nc); return AFTER_QUIT; }
             if (can_rematch && !rematch_requested && (ch == 'r' || ch == 'R')) {
                 net_send_frame(mp->nc->ssl, MSG_REQUEST_REMATCH, NULL, 0);
@@ -733,7 +796,7 @@ static AfterGame play_multiplayer(const char *host, int port, const char *name, 
     strncpy(mp.status_line, "Connecting...", sizeof(mp.status_line) - 1);
     clear();
     wtimeout(stdscr, -1);
-    render_multiplayer(&mp);
+    render_multiplayer(&mp, MP_CHAT_ROW(&mp));
 
     mp.nc = net_connect(host, port, ca);
     if (!mp.nc) {
@@ -762,7 +825,7 @@ static AfterGame play_multiplayer(const char *host, int port, const char *name, 
     bool matched = false;
 
     while (1) {
-        render_multiplayer(&mp);
+        render_multiplayer(&mp, MP_CHAT_ROW(&mp));
 
         int term_fd = STDIN_FILENO;
         int sock_fd = net_get_fd(mp.nc);
@@ -794,7 +857,7 @@ static AfterGame play_multiplayer(const char *host, int port, const char *name, 
                 for (int attempt = 0; attempt < 20 && !recovered; attempt++) {
                     snprintf(mp.status_line, sizeof(mp.status_line),
                              "Connection lost. Reconnecting (attempt %d)...", attempt + 1);
-                    render_multiplayer(&mp);
+                    render_multiplayer(&mp, MP_CHAT_ROW(&mp));
                     sleep(3);
 
                     NetConn *nc2 = net_connect(host, port, ca);
@@ -908,26 +971,7 @@ static AfterGame play_multiplayer(const char *host, int port, const char *name, 
                 /* While composing, every key is text (or a control key for
                  * this input line) - none of it should fall through to the
                  * quit/menu/game bindings below. */
-                if (ch == 27) {
-                    mp.chat_mode = false;
-                } else if (ch == '\n' || ch == KEY_ENTER) {
-                    if (mp.chat_input_len > 0) {
-                        MsgChat cm;
-                        strncpy(cm.text, mp.chat_input, NET_CHAT_MSG_LEN);
-                        cm.text[NET_CHAT_MSG_LEN] = '\0';
-                        uint8_t cbuf[NET_MAX_PAYLOAD];
-                        size_t cn = pack_chat(cbuf, &cm);
-                        net_send_frame(mp.nc->ssl, MSG_CHAT, cbuf, cn);
-                        chat_log_push(&mp, mp.my_name, mp.chat_input);
-                    }
-                    mp.chat_mode = false;
-                } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
-                    if (mp.chat_input_len > 0)
-                        mp.chat_input[--mp.chat_input_len] = '\0';
-                } else if (ch >= 32 && ch < 127 && mp.chat_input_len < NET_CHAT_MSG_LEN) {
-                    mp.chat_input[mp.chat_input_len++] = (char)ch;
-                    mp.chat_input[mp.chat_input_len] = '\0';
-                }
+                mp_chat_key(&mp, ch);
                 continue;
             }
 

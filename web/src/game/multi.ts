@@ -33,16 +33,15 @@ import { WsConn } from "../net/wsconn";
 import type { BoardView } from "../draw/board";
 
 /**
- * Rows multiplayer draws below main.c's h+8 block: status at +5, chat at +6..+8,
- * composer at +9. Reserved so centring keeps them on screen.
+ * Rows multiplayer draws below main.c's h+8 block. On the end screen that is
+ * two lines of result at +5..+6, the chat log at +7..+9 and the composer at
+ * +10, so the deepest row is top+h+10. Reserved so centring keeps it on screen.
  */
-const MP_EXTRA_ROWS = 6;
+const MP_EXTRA_ROWS = 7;
 
 /** src/main.c:794-798 - 20 attempts, 3 s apart, i.e. the server's 60 s grace. */
 const RECONNECT_ATTEMPTS = 20;
 const RECONNECT_DELAY_MS = 3000;
-/** The server waits 20 s for both players to ask (src/server.c REMATCH_WAIT). */
-const REMATCH_WAIT_MS = 20000;
 /** JS cannot send WebSocket control-frame pings, so the app-level ping is used. */
 const PING_INTERVAL_MS = 25000;
 
@@ -80,7 +79,6 @@ export class Multiplayer {
   private endReason = 0;
   private endScores: [number, number] = [0, 0];
   private rematchRequested = false;
-  private endEnteredMs = 0;
 
   private attempts = 0;
   private retryAtMs = 0;
@@ -159,12 +157,9 @@ export class Multiplayer {
       this.lastPingMs = nowMs;
     }
 
-    if (this.phase === "end" && this.rematchRequested &&
-        nowMs - this.endEnteredMs > REMATCH_WAIT_MS) {
-      this.say("Opponent did not want a rematch.", nowMs);
-      this.outcome = "menu";
-      this.phase = "done";
-    }
+    // No deadline here on purpose. The server dropped its fixed rematch window
+    // too, so inventing one in the client would re-impose the limit this change
+    // removed. The screen ends when a player leaves or the socket drops.
   }
 
   private tickReconnect(nowMs: number): void {
@@ -279,7 +274,6 @@ export class Multiplayer {
         this.endReason = c.endReason;
         this.endScores = [c.endScore(0), c.endScore(1)];
         this.phase = "end";
-        this.endEnteredMs = nowMs;
         this.rematchRequested = false;
         return;
 
@@ -346,7 +340,9 @@ export class Multiplayer {
       return;
     }
 
-    renderMultiplayer(s, this.view(s), this.blinks, nowMs);
+    // On the end screen the chat log drops a row, to clear the two lines of
+    // result drawn at +5..+6.
+    renderMultiplayer(s, this.view(s), this.blinks, nowMs, this.phase === "end" ? 1 : 0);
 
     if (this.phase === "end") this.drawEndScreen(s);
     if (this.phase === "reconnecting") {
@@ -383,24 +379,25 @@ export class Multiplayer {
 
     const scoreLine = `You: ${mine}    ${this.opponentName}: ${theirs}`;
     const prompt = this.rematchRequested
-      ? "Rematch requested - waiting for your opponent..."
-      : "[R]ematch   [N]ew game   [Q]uit";
+      ? "Rematch requested, waiting...  Chat: t  [Q]uit"
+      : "[R]ematch  Chat: t  [N]ew game  [Q]uit";
 
+    // Two rows only: the chat log starts at +7 and the composer at +10, so a
+    // third line here would be drawn over by drawChat.
     s.withAttrs(won ? CP_WIN : CP_LOSE, true, () => {
       s.print(v.top + this.boardH + 5, v.left, headline);
       s.clrtoeol(v.top + this.boardH + 5, v.left + headline.length);
     });
+    const line2 = `${scoreLine}    ${prompt}`;
     s.withAttrs(CP_HUD, false, () => {
-      s.print(v.top + this.boardH + 6, v.left, scoreLine);
-      s.clrtoeol(v.top + this.boardH + 6, v.left + scoreLine.length);
-      s.print(v.top + this.boardH + 7, v.left, prompt);
-      s.clrtoeol(v.top + this.boardH + 7, v.left + prompt.length);
+      s.print(v.top + this.boardH + 6, v.left, line2);
+      s.clrtoeol(v.top + this.boardH + 6, v.left + line2.length);
     });
   }
 
   // --------------------------------------------------------------------- input
 
-  onKey(k: Key, nowMs: number): void {
+  onKey(k: Key): void {
     // Chat mode swallows everything, exactly as src/main.c:907-932 does.
     if (this.editor) {
       const r = this.editor.handle(k);
@@ -419,12 +416,15 @@ export class Multiplayer {
 
     if (this.phase === "end") {
       if (k.name !== "char") return;
+      if (k.ch.toLowerCase() === "t") {
+        this.editor = new LineEdit(this.core.consts.maxChatLen);
+        return;
+      }
       switch (k.ch.toLowerCase()) {
         case "r":
           if (!this.rematchRequested) {
             this.conn.send(MSG.REQUEST_REMATCH, new Uint8Array(0));
             this.rematchRequested = true;
-            this.endEnteredMs = nowMs;
           }
           return;
         case "n": this.outcome = "menu"; this.phase = "done"; return;
@@ -438,6 +438,8 @@ export class Multiplayer {
         case "n": this.outcome = "menu"; this.phase = "done"; return;
         case "q": this.outcome = "quit"; this.phase = "done"; return;
         case "t":
+          // The end screen handles t in its own branch above, which returns
+          // before reaching here.
           if (this.phase === "match") this.editor = new LineEdit(this.core.consts.maxChatLen);
           return;
         default: break;
