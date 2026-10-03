@@ -145,7 +145,9 @@ reconnect using your session token for up to 60 seconds before giving up
 and returning to the menu.
 
 When a match ends you stay on the result screen for as long as you like —
-chat with `t`, offer a rematch with `r`. There is no countdown: the screen
+chat with `t`, offer a rematch with `r`. Asking for a rematch also posts
+"wants a rematch" to the chat, so your opponent sees it whether or not
+they are watching the prompt. There is no countdown: the screen
 ends when a player leaves, or when one goes completely silent for 90
 seconds, which is what stops a dropped connection holding a match open.
 

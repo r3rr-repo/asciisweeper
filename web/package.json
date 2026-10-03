@@ -1,7 +1,7 @@
 {
   "name": "asciisweeper-web",
   "private": true,
-  "version": "0.8.0",
+  "version": "0.9.0",
   "type": "module",
   "description": "WebGL browser client for asciisweeper, sharing board.c and the wire protocol via wasm",
   "scripts": {

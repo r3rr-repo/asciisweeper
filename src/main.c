@@ -633,20 +633,33 @@ static void render_multiplayer(MPState *mp, int chat_row)
 
 /* Handles one keypress while the chat composer is open. Shared by the in-match
  * screen and the end-of-match screen so the two cannot drift apart. */
+/* Announced in chat when a player asks for a rematch, so the other side sees
+ * the request even if they are not watching the prompt line. Kept identical to
+ * the browser client's wording. */
+#define REMATCH_CHAT_LINE "wants a rematch"
+
+/* Sends a chat line and records it in our own log, exactly as a typed line is
+ * handled - the server echoes to the opponent only, never back to the sender. */
+static void mp_send_chat(MPState *mp, const char *text)
+{
+    if (!mp->nc || text[0] == '\0')
+        return;
+    MsgChat cm;
+    strncpy(cm.text, text, NET_CHAT_MSG_LEN);
+    cm.text[NET_CHAT_MSG_LEN] = '\0';
+    uint8_t cbuf[NET_MAX_PAYLOAD];
+    size_t cn = pack_chat(cbuf, &cm);
+    net_send_frame(mp->nc->ssl, MSG_CHAT, cbuf, cn);
+    chat_log_push(mp, mp->my_name, cm.text);
+}
+
 static void mp_chat_key(MPState *mp, int ch)
 {
     if (ch == 27) {
         mp->chat_mode = false;
     } else if (ch == '\n' || ch == KEY_ENTER) {
-        if (mp->chat_input_len > 0) {
-            MsgChat cm;
-            strncpy(cm.text, mp->chat_input, NET_CHAT_MSG_LEN);
-            cm.text[NET_CHAT_MSG_LEN] = '\0';
-            uint8_t cbuf[NET_MAX_PAYLOAD];
-            size_t cn = pack_chat(cbuf, &cm);
-            net_send_frame(mp->nc->ssl, MSG_CHAT, cbuf, cn);
-            chat_log_push(mp, mp->my_name, mp->chat_input);
-        }
+        if (mp->chat_input_len > 0)
+            mp_send_chat(mp, mp->chat_input);
         mp->chat_mode = false;
     } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
         if (mp->chat_input_len > 0)
@@ -787,6 +800,9 @@ static AfterGame mp_show_end_screen(MPState *mp, MatchEndReason reason, bool *ou
             if (ch == 'q' || ch == 'Q') { net_close(mp->nc); return AFTER_QUIT; }
             if (can_rematch && !rematch_requested && (ch == 'r' || ch == 'R')) {
                 net_send_frame(mp->nc->ssl, MSG_REQUEST_REMATCH, NULL, 0);
+                /* Say so in chat as well: the prompt line only tells YOU that
+                 * you asked, and the opponent may be reading the log. */
+                mp_send_chat(mp, REMATCH_CHAT_LINE);
                 rematch_requested = true;
             } else if (ch == 'n' || ch == 'N') {
                 net_close(mp->nc);

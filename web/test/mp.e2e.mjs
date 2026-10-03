@@ -410,8 +410,19 @@ try {
   await settle(WAIT_MS);
   clearInterval(pinger);
 
+  // Asking for a rematch is also announced in chat, so the opponent sees it
+  // without having to watch the prompt line. The clients send a normal CHAT
+  // alongside the request, which is why this needs no server support.
   a.frames.length = 0; b.frames.length = 0;
   a.send(MSG.REQUEST_REMATCH, new Uint8Array(0));
+  const rematchLine = coreA.core_in_ptr();
+  new Uint8Array(coreA.memory.buffer).set(new TextEncoder().encode("wants a rematch\0"), rematchLine);
+  a.send(MSG.CHAT, packed(coreA, coreA.core_pack_chat(rematchLine)));
+  const announce = await b.expect(MSG.CHAT_RECV, 5000);
+  ok(b.rxFrame(announce), "the rematch request is announced in chat");
+  eq(readName(coreB, coreB.core_chat_text()), "wants a rematch",
+     "...and the opponent receives the announcement");
+
   b.send(MSG.REQUEST_REMATCH, new Uint8Array(0));
   const againA = await a.expect(MSG.MATCH_START, 6000);
   const againB = await b.expect(MSG.MATCH_START, 6000);

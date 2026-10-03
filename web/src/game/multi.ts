@@ -45,6 +45,13 @@ const RECONNECT_DELAY_MS = 3000;
 /** JS cannot send WebSocket control-frame pings, so the app-level ping is used. */
 const PING_INTERVAL_MS = 25000;
 
+/**
+ * Announced in chat when a player asks for a rematch, so the other side sees
+ * the request even if they are not watching the prompt line. Kept identical to
+ * src/main.c's REMATCH_CHAT_LINE.
+ */
+const REMATCH_CHAT_LINE = "wants a rematch";
+
 type Phase = "connecting" | "queued" | "match" | "end" | "reconnecting" | "done";
 
 export type MpResult = "menu" | "quit" | null;
@@ -109,6 +116,17 @@ export class Multiplayer {
   private say(msg: string, nowMs: number, holdMs = 3000): void {
     this.statusLine = msg;
     this.statusClearAtMs = nowMs + holdMs;
+  }
+
+  /**
+   * Sends a chat line and records it in our own log, exactly as a typed line
+   * is handled - the server echoes to the opponent only, never back to us.
+   */
+  private sendChat(text: string): void {
+    const t = text.trim();
+    if (!t) return;
+    this.conn.send(MSG.CHAT, this.core.packChat(t));
+    this.pushChat(this.myName, t);
   }
 
   private pushChat(from: string, text: string): void {
@@ -403,11 +421,7 @@ export class Multiplayer {
     if (this.editor) {
       const r = this.editor.handle(k);
       if (r === "commit") {
-        const text = this.editor.text.trim();
-        if (text) {
-          this.conn.send(MSG.CHAT, this.core.packChat(text));
-          this.pushChat(this.myName, text);
-        }
+        this.sendChat(this.editor.text);
         this.editor = null;
       } else if (r === "cancel") {
         this.editor = null;
@@ -425,6 +439,9 @@ export class Multiplayer {
         case "r":
           if (!this.rematchRequested) {
             this.conn.send(MSG.REQUEST_REMATCH, new Uint8Array(0));
+            // Say so in chat as well: the prompt line only tells YOU that you
+            // asked, and the opponent may be reading the log.
+            this.sendChat(REMATCH_CHAT_LINE);
             this.rematchRequested = true;
           }
           return;
