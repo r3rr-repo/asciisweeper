@@ -61,6 +61,19 @@ start_precmd="asciisweeper_bridge_precmd"
 
 asciisweeper_bridge_precmd()
 {
+	# Renaming the variable did not delete the old one. Anyone who set
+	# asciisweeper_bridge_user from an earlier README still has it in rc.conf,
+	# and rc.subr honours ${name}_user by running daemon(8) itself as that user
+	# - after which daemon's own -u cannot setusercontext and it exits with
+	# "failed to set user environment". Nothing downstream can recover from it,
+	# so refuse to start and name the fix.
+	if [ -n "${asciisweeper_bridge_user}" ]; then
+		err 1 "asciisweeper_bridge_user=\"${asciisweeper_bridge_user}\" is set in rc.conf, and \${name}_user is reserved by rc.subr.
+It makes rc.subr run daemon(8) as that user, so daemon cannot drop privileges and exits with
+\"failed to set user environment\". Remove it and use asciisweeper_bridge_runas instead:
+  sysrc -x asciisweeper_bridge_user
+  sysrc asciisweeper_bridge_runas=\"${asciisweeper_bridge_user}\"   # only if you do not want the default"
+	fi
 	if [ ! -x "${asciisweeper_bridge_node}" ]; then
 		err 1 "node not found at ${asciisweeper_bridge_node} (pkg install node; or set asciisweeper_bridge_node)"
 	fi

@@ -156,6 +156,8 @@ because JavaScript cannot send WebSocket control-frame pings.
 | WebSocket upgrade returns 404 | `/ws` is matched after the static file handler; move it before |
 | Matches die after about a minute of thinking | proxy read timeout too low |
 | Server rejects with "unsupported protocol version" | the deployed `asciisweeper-server` predates the client's `NET_PROTO_VERSION`; rebuild and restart it |
+| `daemon: failed to set user environment`, or `initgroups(www,80): Operation not permitted` | a leftover `asciisweeper_bridge_user` in `rc.conf`: `sysrc -x asciisweeper_bridge_user`, then `_runas`. The script now refuses to start and says this |
+| `service stop` leaves the bridge running | an `rc.d` script older than 0.12, whose `pidfile` was the child that `daemon -r` respawns; reinstall it |
 
 ## Verifying a deployment
 
