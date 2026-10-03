@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(asciisweeper VERSION 0.10 LANGUAGES C)
+project(asciisweeper VERSION 0.11 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -48,7 +48,7 @@ add_executable(asciisweeper src/main.c src/client_net.c src/avatar.c src/config.
 target_include_directories(asciisweeper PRIVATE ${CURSES_INCLUDE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_link_libraries(asciisweeper PRIVATE ${CURSES_LIBRARIES} OpenSSL::SSL OpenSSL::Crypto)
 
-add_executable(asciisweeper-server src/server.c src/score.c src/uuid.c ${COMMON_SRC})
+add_executable(asciisweeper-server src/server.c src/score.c src/uuid.c src/netaddr.c ${COMMON_SRC})
 target_include_directories(asciisweeper-server PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_link_libraries(asciisweeper-server PRIVATE OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
 
@@ -67,3 +67,6 @@ target_include_directories(uuid-test PRIVATE src)
 add_executable(config-test EXCLUDE_FROM_ALL test/config_test.c src/config.c src/avatar.c src/uuid.c)
 target_include_directories(config-test PRIVATE src)
 target_link_libraries(config-test PRIVATE ${CURSES_LIBRARIES} OpenSSL::Crypto)
+
+add_executable(netaddr-test EXCLUDE_FROM_ALL test/netaddr_test.c src/netaddr.c)
+target_include_directories(netaddr-test PRIVATE src)

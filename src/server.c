@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <time.h>
+#include <poll.h>
 #include <pthread.h>
 #include <ctype.h>
 #include <signal.h>
@@ -28,6 +29,7 @@
 #include "net_io.h"
 #include "score.h"
 #include "uuid.h"
+#include "netaddr.h"
 #include "version.h"
 
 #define MAX_QUEUE            64
@@ -78,18 +80,13 @@ static void log_line(const char *fmt, ...)
     fflush(stderr);
 }
 
-static void ip_to_str(struct in_addr ip, char *buf, size_t len)
-{
-    if (!inet_ntop(AF_INET, &ip, buf, (socklen_t)len))
-        strncpy(buf, "?.?.?.?", len - 1);
-}
 
 /* ---------------- connection ---------------- */
 
 typedef struct Connection {
     SSL *ssl;
     int fd;
-    struct in_addr ip;
+    PeerAddr ip;
     char name[NET_MAX_NAME_LEN + 1];
     /* Canonical UUIDv7 text, filled at HELLO. Display and logging only - the
      * secret that proves it is never kept on the Connection. */
@@ -101,7 +98,7 @@ typedef struct Connection {
     int assigned_player_index;
 } Connection;
 
-static Connection *connection_new(SSL *ssl, int fd, struct in_addr ip)
+static Connection *connection_new(SSL *ssl, int fd, PeerAddr ip)
 {
     Connection *c = calloc(1, sizeof(*c));
     c->ssl = ssl;
@@ -370,7 +367,7 @@ static void queue_remove(Connection *conn)
 
 typedef struct {
     bool used;
-    struct in_addr ip;
+    RateKey key;
     time_t last_join;
     int active_count;
 } RateSlot;
@@ -378,18 +375,19 @@ typedef struct {
 static RateSlot g_rates[RATE_LIMIT_SLOTS];
 static pthread_mutex_t g_rate_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static RateSlot *rate_find_or_create(struct in_addr ip)
+static RateSlot *rate_find_or_create(PeerAddr ip)
 {
+    RateKey key = rate_key_of(&ip);
     int free_idx = -1;
     for (int i = 0; i < RATE_LIMIT_SLOTS; i++) {
-        if (g_rates[i].used && g_rates[i].ip.s_addr == ip.s_addr)
+        if (g_rates[i].used && rate_key_eq(&g_rates[i].key, &key))
             return &g_rates[i];
         if (!g_rates[i].used && free_idx < 0)
             free_idx = i;
     }
     if (free_idx >= 0) {
         g_rates[free_idx].used = true;
-        g_rates[free_idx].ip = ip;
+        g_rates[free_idx].key = key;
         g_rates[free_idx].last_join = 0;
         g_rates[free_idx].active_count = 0;
         return &g_rates[free_idx];
@@ -397,7 +395,7 @@ static RateSlot *rate_find_or_create(struct in_addr ip)
     return NULL; /* table full; fail open on the join check, still bounded by MAX_CONNECTIONS */
 }
 
-static bool rate_allow_join(struct in_addr ip)
+static bool rate_allow_join(PeerAddr ip)
 {
     bool ok = true;
     pthread_mutex_lock(&g_rate_lock);
@@ -415,11 +413,12 @@ static bool rate_allow_join(struct in_addr ip)
     return ok;
 }
 
-static void rate_release(struct in_addr ip)
+static void rate_release(PeerAddr ip)
 {
+    RateKey key = rate_key_of(&ip);
     pthread_mutex_lock(&g_rate_lock);
     for (int i = 0; i < RATE_LIMIT_SLOTS; i++) {
-        if (g_rates[i].used && g_rates[i].ip.s_addr == ip.s_addr) {
+        if (g_rates[i].used && rate_key_eq(&g_rates[i].key, &key)) {
             if (g_rates[i].active_count > 0)
                 g_rates[i].active_count--;
             break;
@@ -906,8 +905,8 @@ static bool try_rematch(Connection *conn, Match *m, int player_index)
 
 static void handle_connection(Connection *conn)
 {
-    char conn_ip[INET_ADDRSTRLEN];
-    ip_to_str(conn->ip, conn_ip, sizeof(conn_ip));
+    char conn_ip[INET6_ADDRSTRLEN];
+    peer_to_str(&conn->ip, conn_ip, sizeof(conn_ip));
 
     time_t hello_deadline = time(NULL) + HELLO_TIMEOUT_SECONDS;
     NetFrame frame;
@@ -1103,7 +1102,7 @@ static void handle_connection(Connection *conn)
 typedef struct {
     SSL_CTX *ctx;
     int client_fd;
-    struct in_addr ip;
+    PeerAddr ip;
 } ThreadArgs;
 
 static void *client_thread(void *arg)
@@ -1121,8 +1120,8 @@ static void *client_thread(void *arg)
         bool retryable = (e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE) ||
                           (e == SSL_ERROR_SYSCALL && (errno == EAGAIN || errno == EWOULDBLOCK));
         if (!retryable || time(NULL) > deadline) {
-            char ipstr[INET_ADDRSTRLEN];
-            ip_to_str(ta->ip, ipstr, sizeof(ipstr));
+            char ipstr[INET6_ADDRSTRLEN];
+            peer_to_str(&ta->ip, ipstr, sizeof(ipstr));
             log_line("TLS handshake failed/timed out for %s", ipstr);
             SSL_free(ssl);
             close(ta->client_fd);
@@ -1168,6 +1167,53 @@ static SSL_CTX *make_server_ctx(const char *cert_path, const char *key_path)
     return ctx;
 }
 
+/*
+ * One listening socket for one family. Returns -1 rather than exiting: a host
+ * with IPv6 disabled, or a v6-only container, should still get a working
+ * server on whichever family it does have. Only failing both is fatal.
+ */
+static int make_listener(int family, int port)
+{
+    int fd = socket(family, SOCK_STREAM, 0);
+    if (fd < 0) {
+        if (errno != EAFNOSUPPORT && errno != EPROTONOSUPPORT)
+            fprintf(stderr, "socket(%s): %s\n",
+                    family == AF_INET ? "AF_INET" : "AF_INET6", strerror(errno));
+        return -1;
+    }
+
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+
+    struct sockaddr_storage ss;
+    socklen_t sslen;
+    memset(&ss, 0, sizeof(ss));
+    if (family == AF_INET) {
+        struct sockaddr_in *a = (struct sockaddr_in *)&ss;
+        a->sin_family = AF_INET;
+        a->sin_addr.s_addr = INADDR_ANY;
+        a->sin_port = htons((uint16_t)port);
+        sslen = sizeof(*a);
+    } else {
+        /* V6ONLY so the two sockets do not contend for the same port, and so
+         * IPv4 peers arrive on the v4 socket as real IPv4 addresses. */
+        setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &one, sizeof(one));
+        struct sockaddr_in6 *a = (struct sockaddr_in6 *)&ss;
+        a->sin6_family = AF_INET6;
+        a->sin6_addr = in6addr_any;
+        a->sin6_port = htons((uint16_t)port);
+        sslen = sizeof(*a);
+    }
+
+    if (bind(fd, (struct sockaddr *)&ss, sslen) != 0 || listen(fd, 64) != 0) {
+        fprintf(stderr, "listen on %s port %d: %s\n",
+                family == AF_INET ? "IPv4" : "IPv6", port, strerror(errno));
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
 int main(int argc, char **argv)
 {
     const char *cert_path = NULL, *key_path = NULL;
@@ -1205,34 +1251,58 @@ int main(int argc, char **argv)
     SSL_CTX *ctx = make_server_ctx(cert_path, key_path);
     if (!ctx) return 1;
 
-    int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
-    int one = 1;
-    setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
-
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port = htons((uint16_t)port);
-
-    if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        perror("bind");
-        return 1;
-    }
-    if (listen(listen_fd, 64) != 0) {
-        perror("listen");
+    int listen_v4 = make_listener(AF_INET, port);
+    int listen_v6 = make_listener(AF_INET6, port);
+    if (listen_v4 < 0 && listen_v6 < 0) {
+        fprintf(stderr, "Could not listen on port %d with either address family\n", port);
         return 1;
     }
 
-    log_line("asciisweeper-server %s listening on port %d", ASCIISWEEPER_VERSION, port);
+    log_line("asciisweeper-server %s listening on port %d (%s%s%s)",
+             ASCIISWEEPER_VERSION, port,
+             listen_v4 >= 0 ? "IPv4" : "",
+             (listen_v4 >= 0 && listen_v6 >= 0) ? " + " : "",
+             listen_v6 >= 0 ? "IPv6" : "");
 
     while (!g_shutdown) {
-        struct sockaddr_in client_addr;
-        socklen_t client_len = sizeof(client_addr);
-        int client_fd = accept(listen_fd, (struct sockaddr *)&client_addr, &client_len);
-        if (client_fd < 0) {
+        /* Two sockets rather than one dual-stack socket: OpenBSD forbids
+         * IPV6_V6ONLY=0 outright and FreeBSD defaults to v6-only, so a single
+         * AF_INET6 listener would quietly stop serving IPv4 there. Polling
+         * both also keeps IPv4 peers in the logs as dotted quads instead of
+         * ::ffff:1.2.3.4. */
+        struct pollfd pfds[2];
+        int nfds = 0;
+        int idx_v4 = -1, idx_v6 = -1;
+        if (listen_v4 >= 0) { idx_v4 = nfds; pfds[nfds].fd = listen_v4; pfds[nfds].events = POLLIN; nfds++; }
+        if (listen_v6 >= 0) { idx_v6 = nfds; pfds[nfds].fd = listen_v6; pfds[nfds].events = POLLIN; nfds++; }
+
+        int pr = poll(pfds, (nfds_t)nfds, 1000);
+        if (pr < 0) {
             if (errno == EINTR) continue;
+            perror("poll");
+            continue;
+        }
+        if (pr == 0)
+            continue;   /* tick, so g_shutdown is noticed promptly */
+
+        int ready = -1;
+        if (idx_v4 >= 0 && (pfds[idx_v4].revents & POLLIN)) ready = listen_v4;
+        else if (idx_v6 >= 0 && (pfds[idx_v6].revents & POLLIN)) ready = listen_v6;
+        if (ready < 0)
+            continue;
+
+        struct sockaddr_storage client_addr;
+        socklen_t client_len = sizeof(client_addr);
+        int client_fd = accept(ready, (struct sockaddr *)&client_addr, &client_len);
+        if (client_fd < 0) {
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) continue;
             perror("accept");
+            continue;
+        }
+
+        PeerAddr peer;
+        if (!peer_from_sockaddr((struct sockaddr *)&client_addr, &peer)) {
+            close(client_fd);
             continue;
         }
 
@@ -1242,8 +1312,8 @@ int main(int argc, char **argv)
         pthread_mutex_unlock(&g_active_connections_lock);
 
         if (over_capacity) {
-            char ipstr[INET_ADDRSTRLEN];
-            ip_to_str(client_addr.sin_addr, ipstr, sizeof(ipstr));
+            char ipstr[INET6_ADDRSTRLEN];
+            peer_to_str(&peer, ipstr, sizeof(ipstr));
             log_line("Rejected connection from %s: server at capacity (%d connections)", ipstr, MAX_CONNECTIONS);
             close(client_fd);
             continue;
@@ -1252,7 +1322,7 @@ int main(int argc, char **argv)
         ThreadArgs *ta = malloc(sizeof(*ta));
         ta->ctx = ctx;
         ta->client_fd = client_fd;
-        ta->ip = client_addr.sin_addr;
+        ta->ip = peer;
 
         pthread_t tid;
         pthread_attr_t attr;
@@ -1269,7 +1339,8 @@ int main(int argc, char **argv)
         pthread_attr_destroy(&attr);
     }
 
-    close(listen_fd);
+    if (listen_v4 >= 0) close(listen_v4);
+    if (listen_v6 >= 0) close(listen_v6);
     SSL_CTX_free(ctx);
     return 0;
 }

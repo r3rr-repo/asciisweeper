@@ -26,6 +26,39 @@ import { connect as tlsConnect } from "node:tls";
 import { readFileSync } from "node:fs";
 import { WebSocketServer } from "ws";
 
+/*
+ * Splits host:port, coping with IPv6.
+ *
+ * A naive lastIndexOf(":") turns "[::1]:4443" into the host "[::1]" with the
+ * brackets attached, which Node cannot resolve, and cannot tell a bare IPv6
+ * literal from a host:port pair at all. Bracketed form wins; otherwise a
+ * single colon is host:port and several colons mean a bare IPv6 address.
+ */
+function parseHostPort(v, defaultPort) {
+  if (v.startsWith("[")) {
+    const end = v.indexOf("]");
+    if (end < 0) {
+      console.error(`bridge: unbalanced brackets in "${v}"`);
+      process.exit(2);
+    }
+    const host = v.slice(1, end);
+    const rest = v.slice(end + 1);
+    return { host, port: rest.startsWith(":") ? Number(rest.slice(1)) : defaultPort };
+  }
+  const first = v.indexOf(":");
+  if (first < 0) return { host: v, port: defaultPort };
+  if (first === v.lastIndexOf(":")) {
+    return { host: v.slice(0, first) || "127.0.0.1", port: Number(v.slice(first + 1)) };
+  }
+  // Several colons and no brackets: a bare IPv6 literal, no port.
+  return { host: v, port: defaultPort };
+}
+
+/** Brackets an IPv6 literal so a logged host:port stays readable. */
+function hostForDisplay(h) {
+  return h.includes(":") ? `[${h}]` : h;
+}
+
 function parseArgs(argv) {
   const o = { listen: 8080, host: "127.0.0.1", upstreamHost: "127.0.0.1", upstreamPort: 4443, ca: null, servername: null, insecure: false };
   for (let i = 2; i < argv.length; i++) {
@@ -35,10 +68,9 @@ function parseArgs(argv) {
       case "--listen": o.listen = Number(next()); break;
       case "--bind": o.host = next(); break;
       case "--upstream": {
-        const v = next();
-        const ix = v.lastIndexOf(":");
-        o.upstreamHost = v.slice(0, ix) || "127.0.0.1";
-        o.upstreamPort = Number(v.slice(ix + 1));
+        const hp = parseHostPort(next(), o.upstreamPort);
+        o.upstreamHost = hp.host;
+        o.upstreamPort = hp.port;
         break;
       }
       case "--ca": o.ca = next(); break;
@@ -48,7 +80,7 @@ function parseArgs(argv) {
       // the certificate pinning the browser cannot.
       case "--insecure": o.insecure = true; break;
       case "-h": case "--help":
-        console.log("usage: bridge.mjs [--listen 8080] [--bind 127.0.0.1] [--upstream host:4443] [--ca file] [--servername name] [--insecure]");
+        console.log("usage: bridge.mjs [--listen 8080] [--bind 127.0.0.1|::1|::] [--upstream host:4443|[::1]:4443] [--ca file] [--servername name] [--insecure]");
         process.exit(0);
         break;
       default:
@@ -155,7 +187,7 @@ wss.on("connection", (ws, req) => {
 });
 
 http.listen(opt.listen, opt.host, () => {
-  log(`bridge listening on ws://${opt.host}:${opt.listen}/ws -> tls://${opt.upstreamHost}:${opt.upstreamPort}`);
+  log(`bridge listening on ws://${hostForDisplay(opt.host)}:${opt.listen}/ws -> tls://${hostForDisplay(opt.upstreamHost)}:${opt.upstreamPort}`);
   if (!ca && !opt.insecure) {
     log("bridge: no --ca given, using the system trust store for the upstream");
   }

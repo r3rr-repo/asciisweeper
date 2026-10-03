@@ -109,6 +109,11 @@ surface this before a player hits it.
 | Self-signed **with** `IP:127.0.0.1` in its SANs | `--upstream 127.0.0.1:4443 --ca /path/server.crt` |
 | Local development, any certificate | `--upstream 127.0.0.1:4443 --insecure` |
 
+An IPv6 upstream is written bracketed: `--upstream [::1]:4443`. The bridge also
+takes `--bind ::` to accept both families, or `--bind ::1` for IPv6 loopback
+only. The game server always listens on both IPv4 and IPv6 and says which at
+startup; if one is unavailable it logs that and serves the other.
+
 `--insecure` skips upstream verification entirely and prints a warning. It is for
 development only: the bridge's upstream hop exists precisely to do the
 certificate pinning a browser cannot.

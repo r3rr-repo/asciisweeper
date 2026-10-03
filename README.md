@@ -209,6 +209,12 @@ v7's time ordering means match ids sort chronologically for free.
 ./build/asciisweeper-server --cert fullchain.pem --key privkey.pem [--port 4443]
 ```
 
+The server listens on **both IPv4 and IPv6** and reports which at startup. If
+one family is unavailable — a container with IPv6 off, say — it logs that and
+serves the other; it only refuses to start when neither works. Rate limiting
+treats a whole IPv6 /64 as one client, since that is what a single subscriber
+is normally given.
+
 The server needs a real TLS certificate and key (e.g. from Let's Encrypt
 for a public server, or a self-signed one for local testing — see below).
 It matches players FIFO: the first two to queue up get paired together.
