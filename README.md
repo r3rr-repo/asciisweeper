@@ -145,16 +145,63 @@ secret, so it is shown only when asked for.
 The binding currently lives in the server's memory and is lost on restart;
 making it persistent is part of the ranking work, and needs no protocol change.
 
-**For a future profile site**, prefer a short public handle in URLs — `/p/robh`
-— with the UUID as the internal key. Not for safety, since the UUID is safe to
-expose, but because 36 unmemorable characters are immutable and would weld the
-internal primary key to the public URL space forever. A handle needs no
-protocol change either: it is purely a website concept the game server never
-sees. Worth setting `Referrer-Policy: strict-origin-when-cross-origin` on those
-pages regardless, since URLs leak into access logs, browser history and
-third-party `Referer` headers whatever they contain. And note a stable
-pseudonymous id counts as personal data under GDPR, so a deletion story is
-worth having before ids are scattered through logs.
+### URL scheme, for when there is a site
+
+Notes for a future profile and ranking site, written down while the reasoning
+is fresh. None of this needs a protocol change — a web handle is purely a
+website concept the game server never sees.
+
+```
+/p/<uuid>                permalink - always works, never changes
+/p/<handle>              canonical once claimed; the uuid URL redirects here
+/leaderboard
+/m/<match-uuid>          if matches get shareable pages
+/api/v1/players/<uuid>   always the uuid, never the handle
+```
+
+**Start with `/p/<uuid>` alone.** The choice is low-stakes because it forecloses
+nothing: if UUID URLs are permalinks from day one, adding handles later breaks
+no existing link, the old URL simply starts redirecting. So there is no reason
+to build a handle system — claiming flow, uniqueness index, reserved words,
+rename policy — before it is clearly wanted.
+
+**Use the canonical dashed form, not a shortened encoding.** The same id three
+ways:
+
+| form | |
+|---|---|
+| canonical, 36 | `/p/01a10141-7c0c-7150-819a-f697b6c7a52c` |
+| base64url, 22 | `/p/AaEBQXwMcVCBmvaXtselLA` |
+| base32, 26 | `/p/01m40m2z0ce58836qpjyvcf99c` |
+
+Shortening saves fourteen characters and costs recognisability, case-safety
+(base64url is mixed-case, unpleasant to read aloud or retype) and the ability to
+paste straight into anything that understands UUIDs.
+
+**Handles for humans, UUIDs for APIs.** This is the rule worth holding to: a
+handle is renameable by definition, so any machine consumer that stores one
+eventually breaks. Internal links, API responses and foreign keys should use the
+UUID even after handles exist.
+
+**A nickname cannot be the URL key.** The game deliberately allows duplicate
+names and free renames — that is why identities exist at all — so a handle would
+be a separate thing, unique only within the site.
+
+If handles do arrive: keep profiles under a `/p/` prefix rather than at the root,
+since root-level usernames mean maintaining a reserved-word list forever.
+`^[a-z0-9][a-z0-9_-]{2,23}$` can never collide with a canonical UUID, so one
+route can serve both and dispatch on shape — but it does admit `admin`, so a
+reserved list is still needed.
+
+Two things to do regardless. Set `Referrer-Policy:
+strict-origin-when-cross-origin` on profile pages, since URLs leak into access
+logs, browser history and third-party `Referer` headers whatever they contain.
+And remember a stable pseudonymous id is personal data under GDPR, so a deletion
+story is worth having before ids are scattered through logs.
+
+Matches have no ids today. If `/m/<id>` is wanted, generate a UUIDv7 per match
+server-side — [`src/uuid.c`](src/uuid.c) is already linked into the server, and
+v7's time ordering means match ids sort chronologically for free.
 
 **Run a server:**
 
