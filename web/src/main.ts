@@ -31,7 +31,9 @@ import {
   MIN_COLS, MIN_ROWS, chooseGrid, clampTargetRows, DEFAULT_TARGET_ROWS,
 } from "./term/sizing";
 
-const VERSION = "asciisweeper-web 0.4";
+/** Injected by vite.config.ts from package.json, so it cannot drift. */
+declare const __APP_VERSION__: string;
+const VERSION = `asciisweeper-web ${__APP_VERSION__}`;
 
 type Mode =
   | { kind: "menu"; sel: number }

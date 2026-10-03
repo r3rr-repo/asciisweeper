@@ -153,6 +153,27 @@ EOF
 if [ "$FORCE_WASM" = 1 ]; then build_wasm; exit 0; fi
 check_stale
 
+# The version lives in CMakeLists.txt; package.json must agree on major.minor,
+# or the terminal client and the browser client would report different versions
+# of the same release. npm needs three-part semver, so only the first two
+# components are compared.
+check_version() {
+  _cmake=$(sed -n 's/^project(asciisweeper VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+  _pkg=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([0-9.]*\)".*/\1/p' web/package.json | head -1)
+  [ -n "$_cmake" ] && [ -n "$_pkg" ] || {
+    echo "build-web.sh: ERROR could not read the version from CMakeLists.txt or web/package.json" >&2
+    exit 1
+  }
+  _cmake_mm=$(echo "$_cmake" | cut -d. -f1,2)
+  _pkg_mm=$(echo "$_pkg" | cut -d. -f1,2)
+  [ "$_cmake_mm" = "$_pkg_mm" ] || {
+    echo "build-web.sh: ERROR version mismatch - CMakeLists.txt says $_cmake, web/package.json says $_pkg" >&2
+    echo "              Bump both: they are two halves of one release." >&2
+    exit 1
+  }
+}
+check_version
+
 command -v npm >/dev/null 2>&1 || { echo "build-web.sh: npm not found" >&2; exit 1; }
 [ -d web/node_modules ] || { echo "==> npm install"; npm --prefix web install --no-fund --no-audit; }
 

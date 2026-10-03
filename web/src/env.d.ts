@@ -5,3 +5,6 @@
  * null means "the /ws path on whatever origin serves this page".
  */
 declare const __WS_URL__: string | null;
+
+/** Injected by vite.config.ts from package.json's version field. */
+declare const __APP_VERSION__: string;

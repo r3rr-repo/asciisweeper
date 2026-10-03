@@ -1,5 +1,9 @@
+import { readFileSync } from "node:fs";
 import { defineConfig, type Plugin } from "vite";
 import { applySiteUrl, normaliseSiteUrl, robotsTxt, sitemapXml } from "./seo";
+
+// Read rather than import, so no tsconfig resolveJsonModule is needed.
+const pkgVersion: string = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).version;
 
 /**
  * Fills in the absolute-URL metadata, or strips it when SITE_URL is unset.
@@ -44,6 +48,9 @@ export default defineConfig({
     // The default multiplayer endpoint, baked at build time. null means "the /ws
     // path on whatever origin serves this page", which is the usual deployment.
     __WS_URL__: JSON.stringify(process.env.WS_URL?.trim() || null),
+    // One source of truth for the web version; build-web.sh checks it against
+    // the CMake project version so the two halves cannot drift apart.
+    __APP_VERSION__: JSON.stringify(pkgVersion),
   },
   build: {
     target: "es2022",
