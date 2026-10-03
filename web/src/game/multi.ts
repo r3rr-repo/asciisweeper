@@ -302,6 +302,7 @@ export class Multiplayer {
       // PLAYING board, and a cursor you cannot act with is misleading.
       cursorX: this.playerToMove === this.myPlayerId ? this.cursorX : -1,
       cursorY: this.playerToMove === this.myPlayerId ? this.cursorY : -1,
+      myPlayerId: this.myPlayerId,
       top: l.top, left: l.left,
     };
   }

@@ -126,7 +126,7 @@ class Client {
   close() { try { this.ws.close(); } catch { /* ignore */ } }
 }
 
-const REVEALED = 0x80, FLAGGED = 0x40;
+const REVEALED = 0x80, FLAGGED = 0x40, MINE = 0x20;
 
 const settle = (ms) => new Promise((res) => setTimeout(res, ms));
 
@@ -265,6 +265,48 @@ try {
   const pong = await a.expect(MSG.PONG);
   ok(pong.payload.length === 0, "PING is answered with an empty PONG");
 
+  // ---- flag scoring, checked against the final revealed board -------------
+  // The test never learns where the mines are until the end, so instead of
+  // predicting the score it recomputes the expected one from the final
+  // snapshot (a loss reveals every mine) and compares with the server's.
+  const flagged = [];   // { x, y, by }  standing flags we placed
+  {
+    // Whoever has the turn flags three cells; flags are turn-bound now.
+    const holder = (await (async () => {
+      const ix = a.frames.map((f) => f.type).lastIndexOf(MSG.TURN);
+      if (ix >= 0 && a.rxFrame(a.frames.splice(ix, 1)[0])) return coreA.core_turn_player();
+      return second;
+    })());
+    const [cl, core, who] = holder === idA ? [a, coreA, idA] : [b, coreB, idB];
+    const cells = cl === a ? a.snapshot() : b.snapshot();
+    let placed = 0;
+    for (let i = 0; i < 256 && placed < 3; i++) {
+      const x = i % 16, y = (i / 16) | 0;
+      if (cells[y * 16 + x] & REVEALED) continue;
+      cl.send(MSG.ACTION_FLAG, packed(core, core.core_pack_action_flag(x, y, 1)));
+      flagged.push({ x, y, by: who });
+      placed++;
+    }
+    await settle(200);
+    ok(placed === 3, `placed ${placed} flags on the holder's turn`);
+  }
+
+  // Flagging out of turn must now be refused - this is the rule that makes
+  // scored flags possible at all.
+  {
+    const offTurn = (await (async () => {
+      const ix = a.frames.map((f) => f.type).lastIndexOf(MSG.TURN);
+      if (ix >= 0 && a.rxFrame(a.frames.splice(ix, 1)[0])) return coreA.core_turn_player();
+      return second;
+    })());
+    const [cl, core] = offTurn === idA ? [b, coreB] : [a, coreA];
+    cl.frames.length = 0;
+    cl.send(MSG.ACTION_FLAG, packed(core, core.core_pack_action_flag(15, 15, 1)));
+    const err = await cl.expect(MSG.ERROR, 3000);
+    ok(cl.rxFrame(err), "flagging out of turn is rejected");
+    eq(core.core_err_code(), 2, "...with ERR_NOT_YOUR_TURN");
+  }
+
   // ---- play to a finish --------------------------------------------------
   // Strictly turn-by-turn, the way real clients behave. An earlier version of
   // this test fired reveals from both clients at once and tripped a
@@ -293,9 +335,14 @@ try {
   }
   ok(ended, "played the match through to MATCH_END");
 
-  // Both sides must have seen it before the end screen is meaningful.
-  await a.expect(MSG.MATCH_END, 4000);
-  await b.expect(MSG.MATCH_END, 4000);
+  // Decode MATCH_END now, before the chat section clears the queues - the
+  // final scores live in it and are needed further down.
+  const endA = await a.expect(MSG.MATCH_END, 4000);
+  const endB = await b.expect(MSG.MATCH_END, 4000);
+  ok(a.rxFrame(endA) && b.rxFrame(endB), "both clients decode MATCH_END");
+  const reported = [coreA.core_end_score(0), coreA.core_end_score(1)];
+  eq(coreB.core_end_score(0), reported[0], "both clients are told the same score for player 0");
+  eq(coreB.core_end_score(1), reported[1], "both clients are told the same score for player 1");
 
   // ---- the behaviour this change exists for -------------------------------
   // Before this, src/server.c dropped chat during the rematch window with
@@ -314,6 +361,26 @@ try {
   b.send(MSG.CHAT, packed(coreB, coreB.core_pack_chat(re)));
   const back = await a.expect(MSG.CHAT_RECV, 5000);
   ok(a.rxFrame(back), "and in the other direction");
+
+  // ---- do the reported scores match the published table? ------------------
+  {
+    const finalCells = a.snapshot();
+    let expected = [0, 0];
+    for (const f of flagged) {
+      const byte = finalCells[f.y * 16 + f.x];
+      const isMine = (byte & MINE) !== 0 && (byte & REVEALED) !== 0;
+      expected[f.by] += isMine ? 1 : -1;
+    }
+    console.log(`  -- ${flagged.length} flags placed; expected flag points ` +
+                `${expected[0]}/${expected[1]} from the revealed board`);
+    // The reported total also contains the bomb penalty, so compare the
+    // DIFFERENCE from what the old rules alone would have produced.
+    console.log(`  -- server reported scores ${reported[0]}/${reported[1]}`);
+    const total = reported[0] + reported[1];
+    const bombPenalty = -(40 - 1);
+    eq(total, bombPenalty + expected[0] + expected[1],
+       "total score = bomb penalty + the flag points implied by the final board");
+  }
 
   // ---- the idle guard releases a player who truly leaves ------------------
   // Opt-in, because against the real 90 s constant it would take 90 s. Run it

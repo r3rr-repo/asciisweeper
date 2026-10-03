@@ -37,7 +37,7 @@ typedef enum { AFTER_RESTART, AFTER_MENU, AFTER_QUIT } AfterGame;
 enum {
     CP_NUM1 = 1, CP_NUM2, CP_NUM3, CP_NUM4, CP_NUM5, CP_NUM6, CP_NUM7, CP_NUM8,
     CP_HIDDEN, CP_FLAG, CP_MINE, CP_MINE_HIT, CP_WRONG_FLAG, CP_EMPTY,
-    CP_HUD, CP_TITLE, CP_CURSOR, CP_WIN, CP_LOSE
+    CP_HUD, CP_TITLE, CP_CURSOR, CP_WIN, CP_LOSE, CP_FLAG_OPP
 };
 
 static void setup_colors(void)
@@ -63,6 +63,9 @@ static void setup_colors(void)
     init_pair(CP_CURSOR, COLOR_BLACK, COLOR_WHITE);
     init_pair(CP_WIN, COLOR_GREEN, -1);
     init_pair(CP_LOSE, COLOR_RED, -1);
+    /* The opponent's flags: same 'F', magenta instead of yellow, so whose call
+     * a flag is can be read at a glance without inventing a new glyph. */
+    init_pair(CP_FLAG_OPP, COLOR_MAGENTA, -1);
 }
 
 static int color_for_number(int n)
@@ -168,7 +171,10 @@ static void draw_footer(Game *g)
     attroff(COLOR_PAIR(CP_HUD));
 }
 
-static void draw_board(Game *g)
+/* `flag_p1` is the wire's bit-4 grid: non-NULL only in multiplayer, where it
+ * says which standing flags belong to player 1. `me` is this client's player
+ * index, so a flag can be drawn as mine or theirs. */
+static void draw_board(Game *g, const uint8_t (*flag_p1)[MAX_W], int me)
 {
     for (int y = 0; y < g->board.h; y++) {
         for (int x = 0; x < g->board.w; x++) {
@@ -183,8 +189,9 @@ static void draw_board(Game *g)
                     pair = CP_WRONG_FLAG;
                 } else {
                     ch = 'F';
-                    pair = CP_FLAG;
                     bold = true;
+                    int owner = flag_p1 ? (flag_p1[y][x] ? 1 : 0) : me;
+                    pair = (owner == me) ? CP_FLAG : CP_FLAG_OPP;
                 }
             } else if (!c->revealed) {
                 ch = '.';
@@ -223,7 +230,7 @@ static void render(Game *g)
     erase();
     draw_hud(g);
     draw_board_frame(g);
-    draw_board(g);
+    draw_board(g, NULL, 0);
     draw_footer(g);
     refresh();
 }
@@ -398,6 +405,10 @@ typedef struct {
     int mines_left;
     uint8_t session_token[NET_TOKEN_LEN];
     char status_line[96];
+    /* Wire bit 4 per cell: which standing flags are player 1's. Kept beside the
+     * Board rather than in it, because wire_to_board deliberately only fills
+     * the fields board.c itself defines. */
+    uint8_t flag_p1[MAX_H][MAX_W];
 
     bool chat_mode; /* true while composing an outgoing line */
     char chat_input[NET_CHAT_MSG_LEN + 1];
@@ -405,6 +416,7 @@ typedef struct {
     char chat_log[CHAT_LOG_LINES][NET_MAX_NAME_LEN + NET_CHAT_MSG_LEN + 4]; /* ring buffer */
     int chat_log_next;
     int chat_log_count;
+
 } MPState;
 
 static void chat_log_push(MPState *mp, const char *from, const char *text)
@@ -604,7 +616,7 @@ static void render_multiplayer(MPState *mp, int chat_row)
     erase();
     draw_mp_hud(mp);
     draw_board_frame(&mp->g);
-    draw_board(&mp->g);
+    draw_board(&mp->g, mp->flag_p1, mp->my_player_id);
     draw_avatar_panels(mp);
     draw_mp_footer(mp);
     if (mp->status_line[0]) {
@@ -908,6 +920,10 @@ static AfterGame play_multiplayer(const char *host, int port, const char *name, 
                     MsgBoardState ws;
                     if (unpack_board_state(frame.payload, frame.len, &ws)) {
                         wire_to_board(&ws, &mp.g.board);
+                        for (int yy = 0; yy < ws.h; yy++)
+                            for (int xx = 0; xx < ws.w; xx++)
+                                mp.flag_p1[yy][xx] =
+                                    (ws.cells[yy][xx] & CELL_BIT_FLAG_P1) ? 1 : 0;
                         mp.mines_left = ws.mines_left;
                         mp.scores[0] = ws.scores[0];
                         mp.scores[1] = ws.scores[1];

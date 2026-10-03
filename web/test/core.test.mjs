@@ -26,7 +26,7 @@ const inst = new WebAssembly.Instance(mod, {});
 const C = inst.exports;
 const mem = () => new Uint8Array(C.memory.buffer);
 
-const REVEALED = 0x80, FLAGGED = 0x40, MINE = 0x20, ADJ = 0x0f;
+const REVEALED = 0x80, FLAGGED = 0x40, MINE = 0x20, FLAG_P1 = 0x10, ADJ = 0x0f;
 const PLAYING = 0, WON = 1, LOST = 2;
 
 const cstr = (ptr) => {
@@ -40,13 +40,36 @@ const snapshot = () => {
 const at = (cells, x, y) => cells[y * C.core_w() + x];
 
 // ------------------------------------------------------------------- constants
-eq(C.core_proto_version(), 4, "protocol version matches net_proto.h");
+eq(C.core_proto_version(), 5, "protocol version matches net_proto.h");
 eq(C.core_max_w(), 60, "MAX_W");
 eq(C.core_max_h(), 30, "MAX_H");
 eq(C.core_mp_w(), 16, "MP board width");
 eq(C.core_mp_mines(), 40, "MP mine count");
 eq(C.core_max_name_len(), 16, "name length");
 eq(C.core_token_len(), 16, "token length");
+
+// Bit 4 carries flag ownership in multiplayer. It must not collide with the
+// adjacent count, which is what would silently corrupt the numbers on a board.
+ok((FLAG_P1 & ADJ) === 0, "the flag-owner bit is clear of the adjacent-count mask");
+ok((FLAG_P1 & (REVEALED | FLAGGED | MINE)) === 0, "...and of every other cell bit");
+
+// core_snapshot feeds the same renderer as multiplayer, so single-player must
+// leave bit 4 clear - otherwise its flags would draw as the opponent's.
+C.core_srand(99);
+C.core_board_init(9, 9, 10);
+C.core_reveal(4, 4);
+{
+  let fx = -1, fy = -1;
+  const cs = snapshot();
+  for (let y = 0; y < 9 && fx < 0; y++) for (let x = 0; x < 9; x++) {
+    if (!(at(cs, x, y) & REVEALED)) { fx = x; fy = y; break; }
+  }
+  ok(fx >= 0, "found a hidden cell for the ownership check");
+  C.core_flag(fx, fy);
+  const after = snapshot();
+  ok((at(after, fx, fy) & FLAGGED) !== 0, "single-player flag is set");
+  eq(at(after, fx, fy) & FLAG_P1, 0, "single-player never sets the flag-owner bit");
+}
 
 // ------------------------------------------------------------- first-click safety
 // board.c places mines only on the first reveal, avoiding the 3x3 around it.
@@ -181,7 +204,7 @@ writeStr(scratch, "Rob");
 let n = C.core_pack_hello(scratch, 3, 5);
 ok(n > 0, "pack_hello produced a payload");
 const helloBytes = mem().slice(C.core_tx_ptr(), C.core_tx_ptr() + n);
-eq(helloBytes[0], 4, "hello carries the protocol version");
+eq(helloBytes[0], 5, "hello carries the protocol version");
 
 // MSG_CHAT_RECV round-trip through core_rx
 writeStr(scratch, "hello there");

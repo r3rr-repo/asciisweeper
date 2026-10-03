@@ -10,11 +10,11 @@
  */
 import { Surface } from "../src/term/surface";
 import { XTERM, SLOT_DEFAULT_BG, SLOT_DEFAULT_FG } from "../src/term/palette";
-import { setupColors, CP_CURSOR, CP_EMPTY, CP_FLAG, CP_HIDDEN, CP_NUM1, CP_WRONG_FLAG, CP_MINE_HIT } from "../src/draw/colors";
+import { setupColors, CP_CURSOR, CP_EMPTY, CP_FLAG, CP_FLAG_OPP, CP_HIDDEN, CP_NUM1, CP_WRONG_FLAG, CP_MINE_HIT } from "../src/draw/colors";
 import { drawBoard, drawBoardFrame, drawHud, drawFooter, type BoardView } from "../src/draw/board";
 import { drawAvatar } from "../src/draw/avatar";
 import { computeLayout, clampDifficulty, AVATAR_WIDTH_CHARS } from "../src/game/layout";
-import { CELL_FLAGGED, CELL_MINE, CELL_REVEALED, LOST, PLAYING, WON } from "../src/proto";
+import { CELL_FLAG_P1, CELL_FLAGGED, CELL_MINE, CELL_REVEALED, LOST, PLAYING, WON } from "../src/proto";
 
 let pass = 0, fail = 0;
 const ok = (c: boolean, m: string) => { if (c) pass++; else { fail++; console.error("FAIL:", m); } };
@@ -147,6 +147,40 @@ function view(over: Partial<BoardView> & { w: number; h: number; cells: Uint8Arr
   eq(chAt(won, 4, 1), "F", "on a won board flagged-but-unrevealed mines draw 'F'");
   eq(chAt(won, 4, 3), "F", "...for every mine");
   void CP_WRONG_FLAG;
+}
+
+// ------------------------------------------------------- flag ownership colours
+{
+  const w = 2, h = 1;
+  // x=0 flagged by player 0 (bit4 clear), x=1 flagged by player 1 (bit4 set)
+  const c = cells(w, h, (x) => CELL_FLAGGED | (x === 1 ? CELL_FLAG_P1 : 0));
+
+  // Seen as player 0: the first flag is mine, the second theirs.
+  const as0 = makeSurface(20, 10);
+  drawBoard(as0, view({ w, h, cells: c, myPlayerId: 0 }));
+  eq(chAt(as0, 4, 1), "F", "an owned flag is still drawn as 'F'");
+  eq(chAt(as0, 4, 3), "F", "an opponent flag uses the same glyph, not a new one");
+  eq(fgAt(as0, 4, 1), 11, "player 0 sees their own flag in bright yellow (CP_FLAG bold)");
+  eq(fgAt(as0, 4, 3), 13, "...and the opponent's in bright magenta (CP_FLAG_OPP bold)");
+
+  // The same board seen as player 1: the colours swap.
+  const as1 = makeSurface(20, 10);
+  drawBoard(as1, view({ w, h, cells: c, myPlayerId: 1 }));
+  eq(fgAt(as1, 4, 1), 13, "player 1 sees player 0's flag as the opponent's");
+  eq(fgAt(as1, 4, 3), 11, "...and their own as their own");
+
+  // Single-player has no owner, so every flag is drawn as yours.
+  const sp = makeSurface(20, 10);
+  drawBoard(sp, view({ w, h, cells: c }));
+  eq(fgAt(sp, 4, 1), 11, "single-player draws flags as yours");
+  eq(fgAt(sp, 4, 3), 11, "...even when bit 4 happens to be set");
+
+  // A wrong flag on a lost board must still read as wrong, whoever placed it.
+  const lost = makeSurface(20, 10);
+  drawBoard(lost, view({ w, h, cells: c, status: LOST, myPlayerId: 0 }));
+  eq(chAt(lost, 4, 1), "X", "a wrong flag is still X on a loss");
+  eq(chAt(lost, 4, 3), "X", "...including the opponent's");
+  void CP_FLAG; void CP_FLAG_OPP;
 }
 
 // ------------------------------------------------------------------ exploded cell

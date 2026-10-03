@@ -7,11 +7,11 @@
  * multiplayer. One decode path serves both modes, mirroring the fact that the C
  * draw_board already does.
  */
-import { CELL_ADJACENT, CELL_FLAGGED, CELL_MINE, CELL_REVEALED, LOST, PLAYING } from "../proto";
+import { CELL_ADJACENT, CELL_FLAG_P1, CELL_FLAGGED, CELL_MINE, CELL_REVEALED, LOST, PLAYING } from "../proto";
 import type { Surface } from "../term/surface";
 import {
-  CP_CURSOR, CP_EMPTY, CP_FLAG, CP_HIDDEN, CP_HUD, CP_MINE, CP_MINE_HIT,
-  CP_TITLE, CP_WRONG_FLAG, colorForNumber,
+  CP_CURSOR, CP_EMPTY, CP_FLAG, CP_FLAG_OPP, CP_HIDDEN, CP_HUD, CP_MINE,
+  CP_MINE_HIT, CP_TITLE, CP_WRONG_FLAG, colorForNumber,
 } from "./colors";
 
 export interface BoardView {
@@ -23,6 +23,11 @@ export interface BoardView {
   explodedY: number;
   cursorX: number;
   cursorY: number;
+  /**
+   * This client's player index, in multiplayer. Undefined in single-player,
+   * where flags have no owner and all of them are drawn as yours.
+   */
+  myPlayerId?: number;
   top: number;
   left: number;
 }
@@ -113,8 +118,11 @@ export function drawBoard(s: Surface, v: BoardView): void {
           pair = CP_WRONG_FLAG;
         } else {
           ch = "F";
-          pair = CP_FLAG;
           bold = true;
+          // Wire bit 4 says whose flag it is; in single-player there is no
+          // owner, so everything is drawn as yours.
+          const owner = (byte & CELL_FLAG_P1) !== 0 ? 1 : 0;
+          pair = v.myPlayerId === undefined || owner === v.myPlayerId ? CP_FLAG : CP_FLAG_OPP;
         }
       } else if (!revealed) {
         ch = ".";

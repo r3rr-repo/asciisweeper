@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include "board.h"
 
-#define NET_PROTO_VERSION   4
+#define NET_PROTO_VERSION   5
 #define NET_MAX_PAYLOAD     8192
 #define NET_MAX_NAME_LEN    16
 #define NET_TOKEN_LEN       16
@@ -127,11 +127,16 @@ typedef struct {
 
 /* Cell byte layout: bit7 revealed, bit6 flagged, bit5 is_mine (only
  * meaningful/sent when revealed - an unclicked mine's location is never
- * transmitted), bits0-3 adjacent count (0-8, meaningful when revealed and
- * not a mine). */
+ * transmitted), bit4 the flag's owner (only meaningful with bit6: clear for
+ * player 0, set for player 1), bits0-3 adjacent count (0-8, meaningful when
+ * revealed and not a mine).
+ *
+ * Flags placed automatically by board_check_win when the board is cleared
+ * belong to nobody; they are sent with bit4 clear and score for no one. */
 #define CELL_BIT_REVEALED 0x80
 #define CELL_BIT_FLAGGED  0x40
 #define CELL_BIT_MINE     0x20
+#define CELL_BIT_FLAG_P1  0x10
 #define CELL_ADJACENT_MASK 0x0F
 
 typedef struct {

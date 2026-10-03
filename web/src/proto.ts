@@ -16,6 +16,8 @@
 export const CELL_REVEALED = 0x80;
 export const CELL_FLAGGED = 0x40;
 export const CELL_MINE = 0x20;
+/** Only meaningful with CELL_FLAGGED: clear = player 0's flag, set = player 1's. */
+export const CELL_FLAG_P1 = 0x10;
 export const CELL_ADJACENT = 0x0f;
 
 /** GameStatus, src/board.h:16. */

@@ -88,11 +88,28 @@ already-revealed number.
 ## Multiplayer
 
 Two players share one minefield and alternate turns. A turn is one reveal
-or one chord; flagging is free and doesn't end your turn. If you click a
-bomb, you lose `mines - 1` points and the match ends; if the board is
-fully cleared without anyone hitting a bomb, both players gain `mines`
-points. Multiplayer matches are fixed at Intermediate size (16x16, 40
-mines).
+or one chord. Matches are fixed at Intermediate size (16x16, 40 mines).
+
+**Flags score.** A flag is a claim that there is a bomb underneath, and you
+are held to it when the match ends:
+
+| | |
+|---|---|
+| Your flag was on a bomb | **+1** |
+| Your flag was on an empty cell | **−1** |
+| You reversed their flag and there was no bomb | **+2** |
+| You reversed their flag and there *was* a bomb | **−2** to you, they still get **+1** |
+
+Plus the outcome: hitting a bomb costs the player who clicked it
+`mines - 1` and ends the match, and clearing the board gives both players
+`mines`.
+
+Two rules keep flags honest. You may only flag **on your turn** — though
+flagging still doesn't end it, so you can mark the board up while you
+think — and a cell **settles after one reversal**: once someone has
+overruled a flag, that cell is frozen for the rest of the match. Taking
+back your own flag is just a correction and scores nothing. Your flags
+and your opponent's are drawn in different colours.
 
 **Run a server:**
 

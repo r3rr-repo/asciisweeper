@@ -17,7 +17,7 @@ export const CP_NUM1 = 1, CP_NUM2 = 2, CP_NUM3 = 3, CP_NUM4 = 4,
              CP_NUM5 = 5, CP_NUM6 = 6, CP_NUM7 = 7, CP_NUM8 = 8,
              CP_HIDDEN = 9, CP_FLAG = 10, CP_MINE = 11, CP_MINE_HIT = 12,
              CP_WRONG_FLAG = 13, CP_EMPTY = 14, CP_HUD = 15, CP_TITLE = 16,
-             CP_CURSOR = 17, CP_WIN = 18, CP_LOSE = 19;
+             CP_CURSOR = 17, CP_WIN = 18, CP_LOSE = 19, CP_FLAG_OPP = 20;
 
 /** src/avatar.c:10 and :20 - deliberately out of the way of the CP_* range. */
 export const AVATAR_PAIR_BASE = 100;
@@ -45,6 +45,9 @@ export function setupColors(s: Surface): void {
   s.initPair(CP_CURSOR, BLACK, WHITE);
   s.initPair(CP_WIN, GREEN, DEFAULT);
   s.initPair(CP_LOSE, RED, DEFAULT);
+  // The opponent's flags: same 'F' glyph, magenta rather than yellow, so whose
+  // call a flag is reads at a glance without inventing a new character.
+  s.initPair(CP_FLAG_OPP, MAGENTA, DEFAULT);
 
   // src/avatar.c:28-31 - white on the colour for the body, eye-colour on the
   // colour for a closed (blinking) eye.

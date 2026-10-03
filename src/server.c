@@ -26,6 +26,7 @@
 #include "board.h"
 #include "net_proto.h"
 #include "net_io.h"
+#include "score.h"
 #include "version.h"
 
 #define MAX_QUEUE            64
@@ -122,6 +123,7 @@ static void connection_free(Connection *c)
 typedef struct Match {
     pthread_mutex_t lock;
     Board board;
+    FlagState flags[MAX_H][MAX_W];
     int scores[2];
     int player_to_move;
     Connection *conns[2];
@@ -241,6 +243,7 @@ static int queue_join_and_maybe_pair(Connection *conn)
         Match *m = calloc(1, sizeof(Match));
         pthread_mutex_init(&m->lock, NULL);
         board_init(&m->board, MP_BOARD_W, MP_BOARD_H, MP_MINES);
+        memset(m->flags, 0, sizeof(m->flags));
         m->player_to_move = 0;
         m->conns[0] = a;
         m->conns[1] = b;
@@ -389,6 +392,18 @@ static void sanitize_chat(char *text)
 
 /* ---------------- match play ---------------- */
 
+/* board_to_wire only knows about the Board, which has no notion of who placed a
+ * flag, so ownership is stamped on afterwards rather than by widening the
+ * shared codec - net_io.c stays identical for the single-player and wasm paths. */
+static void stamp_flag_owners(const Board *b, const FlagState flags[MAX_H][MAX_W],
+                              MsgBoardState *out)
+{
+    for (int y = 0; y < b->h; y++)
+        for (int x = 0; x < b->w; x++)
+            if ((out->cells[y][x] & CELL_BIT_FLAGGED) && flags[y][x].flagger == 2)
+                out->cells[y][x] |= CELL_BIT_FLAG_P1;
+}
+
 static void broadcast_board_state(Match *m)
 {
     /* Compose the outgoing snapshot while holding the lock, then send
@@ -398,6 +413,7 @@ static void broadcast_board_state(Match *m)
     int32_t scores[2] = { m->scores[0], m->scores[1] };
     MsgBoardState wire;
     board_to_wire(&m->board, mines_left, scores, 0, &wire);
+    stamp_flag_owners(&m->board, m->flags, &wire);
     MsgTurn turn = { .player_id_to_move = (uint8_t)m->player_to_move };
     Connection *c0 = m->connected[0] ? m->conns[0] : NULL;
     Connection *c1 = m->connected[1] ? m->conns[1] : NULL;
@@ -423,6 +439,7 @@ static void send_board_state_to(Connection *conn, Match *m)
     int32_t scores[2] = { m->scores[0], m->scores[1] };
     MsgBoardState wire;
     board_to_wire(&m->board, mines_left, scores, 0, &wire);
+    stamp_flag_owners(&m->board, m->flags, &wire);
     MsgTurn turn = { .player_id_to_move = (uint8_t)m->player_to_move };
     pthread_mutex_unlock(&m->lock);
 
@@ -467,12 +484,38 @@ static void apply_action_and_broadcast(Match *m, int player_index, uint8_t type,
     if (type == MSG_ACTION_FLAG) {
         MsgActionFlag act;
         if (!unpack_action_flag(payload, len, &act)) { rejected = true; reject_code = ERR_MALFORMED; }
+        /* Flags score now, so they have to be turn-bound: otherwise either
+         * player could flag everything at any moment, and since un-flagging is
+         * equally free the two could re-flag in a loop until the board cleared.
+         * It still does not END the turn - marking up the board while thinking
+         * is the whole point of flags. */
+        else if (player_index != m->player_to_move) { rejected = true; reject_code = ERR_NOT_YOUR_TURN; }
         else if (!board_in_bounds(&m->board, act.x, act.y)) { rejected = true; reject_code = ERR_OUT_OF_BOUNDS; }
         else {
             Cell *c = &m->board.cells[act.y][act.x];
-            if (!c->revealed && !m->board.first_move) {
-                if (act.flagged && !c->flagged) { c->flagged = true; m->board.flags_placed++; }
-                else if (!act.flagged && c->flagged) { c->flagged = false; m->board.flags_placed--; }
+            FlagState *fs = &m->flags[act.y][act.x];
+            if (fs->settled) {
+                /* One reversal per cell, then it is frozen. This is what stops
+                 * the flag/unflag loop. */
+                rejected = true;
+                reject_code = ERR_INVALID_ACTION;
+            } else if (!c->revealed && !m->board.first_move) {
+                if (act.flagged && !c->flagged) {
+                    c->flagged = true;
+                    m->board.flags_placed++;
+                    fs->flagger = (uint8_t)(player_index + 1);
+                } else if (!act.flagged && c->flagged) {
+                    c->flagged = false;
+                    m->board.flags_placed--;
+                    if (fs->flagger == (uint8_t)(player_index + 1)) {
+                        /* Taking back your own flag is a correction, not a
+                         * reversal: it scores nothing and leaves the cell open. */
+                        fs->flagger = 0;
+                    } else if (fs->flagger != 0) {
+                        fs->reverser = (uint8_t)(player_index + 1);
+                        fs->settled = true;
+                    }
+                }
             }
         }
     } else if (type == MSG_ACTION_REVEAL) {
@@ -508,11 +551,19 @@ static void apply_action_and_broadcast(Match *m, int player_index, uint8_t type,
     if (!rejected && ends_turn) {
         if (m->board.status == STATE_LOST) {
             m->scores[player_index] -= (m->board.mines - 1);
+            int fp[2];
+            score_flags(&m->board, m->flags, fp);
+            m->scores[0] += fp[0];
+            m->scores[1] += fp[1];
             match_ended = true;
             end_reason = END_BOMB;
         } else if (m->board.status == STATE_WON) {
             m->scores[0] += m->board.mines;
             m->scores[1] += m->board.mines;
+            int fp[2];
+            score_flags(&m->board, m->flags, fp);
+            m->scores[0] += fp[0];
+            m->scores[1] += fp[1];
             match_ended = true;
             end_reason = END_CLEAN_CLEAR;
         } else {
@@ -721,6 +772,7 @@ static bool try_rematch(Connection *conn, Match *m, int player_index)
              * Session tokens are untouched: it's still the same Match and
              * player slots, so the existing reconnect tokens stay valid. */
             board_init(&m->board, m->board.w, m->board.h, m->board.mines);
+            memset(m->flags, 0, sizeof(m->flags));
             m->scores[0] = 0;
             m->scores[1] = 0;
             m->player_to_move = 1 - m->player_to_move; /* give the other player first move this time */
