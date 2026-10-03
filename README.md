@@ -121,7 +121,21 @@ history.
 
 The secret is what proves the id is yours. The server binds the pair the first
 time it sees a UUID and refuses it afterwards if the secret does not match, so
-nobody can claim someone else's identity. Treat it like a password.
+nobody can claim someone else's identity.
+
+**Which half is public.** The UUID is the public one: safe in logs, on profile
+pages and in URLs, because on its own it proves nothing. It does encode its own
+creation time to the millisecond — the first 48 bits are a unix timestamp — so
+account age is not private, though the remaining 74 bits are random and ids are
+neither guessable nor enumerable.
+
+**The secret is the credential**, and the `<uuid>:<secret>` string from Export
+is a *complete* one. That pair is the thing never to paste into a bug report, a
+screenshot or a chat — a far likelier accident than the UUID leaking, which is
+why Export is behind an explicit keypress.
+
+This split is load-bearing. Authenticating with the UUID alone would turn the
+public identifier into a bearer token and undo all of the above.
 
 **Identity...** in the menu shows your id, and can export it as
 `<uuid>:<secret>` or import one, which is how you play as the same person from
@@ -130,6 +144,17 @@ secret, so it is shown only when asked for.
 
 The binding currently lives in the server's memory and is lost on restart;
 making it persistent is part of the ranking work, and needs no protocol change.
+
+**For a future profile site**, prefer a short public handle in URLs — `/p/robh`
+— with the UUID as the internal key. Not for safety, since the UUID is safe to
+expose, but because 36 unmemorable characters are immutable and would weld the
+internal primary key to the public URL space forever. A handle needs no
+protocol change either: it is purely a website concept the game server never
+sees. Worth setting `Referrer-Policy: strict-origin-when-cross-origin` on those
+pages regardless, since URLs leak into access logs, browser history and
+third-party `Referer` headers whatever they contain. And note a stable
+pseudonymous id counts as personal data under GDPR, so a deletion story is
+worth having before ids are scattered through logs.
 
 **Run a server:**
 
