@@ -25,7 +25,23 @@ trying it out:
 asciisweeper-server --cert fullchain.pem --key privkey.pem --port 4443
 
 node web/bridge/bridge.mjs --bind 127.0.0.1 --listen 8080 \
-  --upstream 127.0.0.1:4443 --servername yourdomain.com
+  --upstream 127.0.0.1:4443 --servername s1.yourdomain.com
+```
+
+## The game server
+
+The game server and the bridge are separate services: the server is the C binary
+that owns the rules, the bridge only translates WebSocket to TLS for browsers.
+Terminal players need the server alone. Both are included here because a host
+serving the browser version runs both, as the same `asciisweeper` account.
+
+```sh
+# FreeBSD
+install -m 555 asciisweeper-server.rc /usr/local/etc/rc.d/asciisweeper_server
+sysrc asciisweeper_server_enable="YES"
+sysrc asciisweeper_server_cert="/usr/local/etc/letsencrypt/live/s1.example.com/fullchain.pem"
+sysrc asciisweeper_server_key="/usr/local/etc/letsencrypt/live/s1.example.com/privkey.pem"
+service asciisweeper_server start
 ```
 
 | Variable | Default |
@@ -73,7 +89,7 @@ pkg install node npm
 pw useradd asciisweeper -d /nonexistent -s /usr/sbin/nologin -c 'asciisweeper bridge'
 install -m 555 asciisweeper-bridge.rc /usr/local/etc/rc.d/asciisweeper_bridge
 sysrc asciisweeper_bridge_enable="YES"
-sysrc asciisweeper_bridge_servername="yourdomain.com"
+sysrc asciisweeper_bridge_servername="s1.yourdomain.com"
 service asciisweeper_bridge start
 ```
 
@@ -136,10 +152,18 @@ upstream error: Hostname/IP does not match certificate's altnames:
 does not change which name is checked. The identity check still uses the host.
 
 The fix is to tell Node the name the certificate was issued for, while still
-connecting to loopback:
+connecting to loopback. Note *which* name: the game server's, not the site's.
+If the page is served from `yourdomain.com` but the server's certificate is for
+`s1.yourdomain.com`, then `--servername yourdomain.com` fails in exactly the
+same way, with the altnames quoted in the error:
+
+```
+upstream error: Hostname/IP does not match certificate's altnames:
+    Host: yourdomain.com. is not in the cert's altnames: DNS:s1.yourdomain.com
+```
 
 ```sh
-node bridge.mjs --listen 8080 --upstream 127.0.0.1:4443 --servername yourdomain.com
+node bridge.mjs --listen 8080 --upstream 127.0.0.1:4443 --servername s1.yourdomain.com
 ```
 
 ### Why local testing does not catch it
@@ -161,7 +185,7 @@ surface this before a player hits it.
 
 | The game server's certificate is... | Flags |
 |---|---|
-| Issued for a domain (Let's Encrypt etc.) | `--upstream 127.0.0.1:4443 --servername yourdomain.com` |
+| Issued for a domain (Let's Encrypt etc.) | `--upstream 127.0.0.1:4443 --servername s1.yourdomain.com` |
 | Signed by a private CA | `--upstream 127.0.0.1:4443 --servername <name in cert> --ca /path/ca.pem` |
 | Self-signed **with** `IP:127.0.0.1` in its SANs | `--upstream 127.0.0.1:4443 --ca /path/server.crt` |
 | Local development, any certificate | `--upstream 127.0.0.1:4443 --insecure` |
@@ -200,6 +224,8 @@ because JavaScript cannot send WebSocket control-frame pings.
 | Matches die after about a minute of thinking | proxy read timeout too low |
 | Server rejects with "unsupported protocol version" | the deployed `asciisweeper-server` predates the client's `NET_PROTO_VERSION`; rebuild and restart it |
 | `daemon: failed to set user environment`, or `initgroups(www,80): Operation not permitted` | a leftover `asciisweeper_bridge_user` in `rc.conf`: `sysrc -x asciisweeper_bridge_user`, then `_runas`. The script now refuses to start and says this |
+| Server exits at startup with an OpenSSL error about the key or `PEM routines` | the key is not readable by `asciisweeper` — see above |
+| Clients get the old certificate after a renewal | the server reads it once at startup; restart it from a deploy hook |
 | `service stop` leaves the bridge running | an `rc.d` script older than 0.12, whose `pidfile` was the child that `daemon -r` respawns; reinstall it |
 
 ## Verifying a deployment
@@ -214,5 +240,3 @@ The middle one is the real check: it drives two clients through the deployed
 bridge into the deployed server using the same wasm codec the browser uses. It
 queues two players on the live server for a few seconds, so run it when nobody is
 waiting for a match.
-| Server exits at startup with an OpenSSL error about the key or `PEM routines` | the key is not readable by `asciisweeper` — see above |
-| Clients get the old certificate after a renewal | the server reads it once at startup; restart it from a deploy hook |

@@ -111,6 +111,26 @@ if (opt.insecure) {
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
+/*
+ * A certificate name mismatch is the one upstream failure that is always
+ * misconfiguration rather than a transient fault, and the message does not say
+ * what to change: --servername has to name the GAME SERVER's certificate, which
+ * is usually not the domain the site itself is served from - s1.example.com
+ * rather than example.com. Node's error does quote the altnames the server
+ * presented, so the fix is in the log already; point at it.
+ *
+ * Once per process: otherwise every player who tries to connect reprints it.
+ */
+let altnamesHinted = false;
+const hintAltnames = (msg) => {
+  if (altnamesHinted || !msg.includes("does not match certificate's altnames")) return;
+  altnamesHinted = true;
+  log("bridge: HINT --servername must be a name the GAME SERVER's certificate covers,");
+  log("bridge:      not necessarily the domain the site is served from.");
+  log(`bridge:      Checked against: ${upstreamServername ?? `the IP ${opt.upstreamHost}`}.`);
+  log("bridge:      Use one of the altnames quoted above instead.");
+};
+
 // A plain HTTP server so a health check has somewhere to land; the WebSocket
 // upgrade is handled on /ws.
 const http = createServer((req, res) => {
@@ -180,7 +200,10 @@ wss.on("connection", (ws, req) => {
     log(`[${id}] closed (${why})`);
   };
 
-  upstream.on("error", (e) => shutdown(`upstream error: ${e.message}`));
+  upstream.on("error", (e) => {
+    shutdown(`upstream error: ${e.message}`);
+    hintAltnames(e.message);
+  });
   upstream.on("close", () => shutdown("upstream closed"));
   ws.on("error", (e) => shutdown(`client error: ${e.message}`));
   ws.on("close", () => shutdown("client closed"));

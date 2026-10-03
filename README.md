@@ -422,15 +422,17 @@ against the current directory.
 
 ### 5. Choose the bridge's upstream TLS flags
 
-**This is the step that bites.** Node verifies the game server's certificate
-against `servername || host`, so connecting to `127.0.0.1` without `--servername`
+**This is the step that bites.** `--servername` names the certificate the
+**game server** presents, which is usually not the domain the site is served
+from — `s1.yourdomain.com`, not `yourdomain.com`. Node verifies the game
+server's certificate against `servername || host`, so connecting to `127.0.0.1` without `--servername`
 checks the certificate against the *IP address* — which a certificate issued for
 a domain name does not cover. Passing `--ca` does not help; the identity check
 still uses the host.
 
 | The game server's certificate is... | Flags |
 |--------------------------------------|-------|
-| Issued for a domain (Let's Encrypt)  | `--upstream 127.0.0.1:4443 --servername yourdomain.com` |
+| Issued for a domain (Let's Encrypt)  | `--upstream 127.0.0.1:4443 --servername s1.yourdomain.com` |
 | Signed by a private CA               | `--upstream 127.0.0.1:4443 --servername <name in cert> --ca /path/ca.pem` |
 | Self-signed **with** `IP:127.0.0.1` in its SANs | `--upstream 127.0.0.1:4443 --ca /path/server.crt` |
 
@@ -465,7 +467,7 @@ sudo pw useradd asciisweeper -d /nonexistent -s /usr/sbin/nologin \
   -c 'asciisweeper bridge'
 
 sudo sysrc asciisweeper_bridge_enable="YES"
-sudo sysrc asciisweeper_bridge_servername="yourdomain.com"   # from step 5
+sudo sysrc asciisweeper_bridge_servername="s1.yourdomain.com"   # from step 5
 
 sudo service asciisweeper_bridge start
 sudo service asciisweeper_bridge status
@@ -486,7 +488,7 @@ user:
 
 ```sh
 node /path/to/web/bridge/bridge.mjs --bind 127.0.0.1 --listen 8080 \
-  --upstream 127.0.0.1:4443 --servername yourdomain.com
+  --upstream 127.0.0.1:4443 --servername s1.yourdomain.com
 ```
 
 It stays in the foreground, logs to stdout, and exits on `SIGTERM`/`SIGINT`.

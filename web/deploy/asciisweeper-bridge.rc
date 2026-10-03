@@ -8,14 +8,15 @@
 # Configure in /etc/rc.conf (or /etc/rc.conf.d/asciisweeper_bridge):
 #
 #   asciisweeper_bridge_enable="YES"
-#   asciisweeper_bridge_servername="yourdomain.com"
+#   asciisweeper_bridge_servername="s1.yourdomain.com"
 #
 # then:
 #   service asciisweeper_bridge start
 #   service asciisweeper_bridge status
 #
-# asciisweeper_bridge_servername is almost always required: Node verifies the
-# game server's certificate against servername || host, so connecting to
+# asciisweeper_bridge_servername is almost always required, and it names the
+# GAME SERVER's certificate - usually not the domain the site is served from.
+# Node verifies that certificate against servername || host, so connecting to
 # 127.0.0.1 without it checks the certificate against the IP address, which a
 # certificate issued for a domain name does not cover. Setting _ca instead does
 # NOT help. See README.md in this directory.

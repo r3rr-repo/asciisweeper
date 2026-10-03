@@ -10,7 +10,8 @@
 # 127.0.0.1 without it checks the certificate against the IP - which a certificate
 # issued for a domain name does not cover, and the handshake fails with
 # "Hostname/IP does not match certificate's altnames". Passing --ca does not help;
-# the identity check still uses the host. Set it to the name in the certificate.
+# the identity check still uses the host. Set it to the name in the GAME SERVER's
+# certificate, which is usually not the domain the site is served from.
 #
 # Drop --ca entirely if the game server's certificate is publicly valid (Let's
 # Encrypt): the system trust store covers it. Keep it to pin a private CA, or when
@@ -32,7 +33,7 @@ ExecStart=/usr/bin/node bridge.mjs \
   --bind 127.0.0.1 \
   --listen 8080 \
   --upstream 127.0.0.1:4443 \
-  --servername example.com
+  --servername s1.example.com
 Restart=on-failure
 RestartSec=2
 
