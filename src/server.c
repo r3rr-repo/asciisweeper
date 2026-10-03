@@ -93,7 +93,26 @@ typedef struct Connection {
     char player_id_str[UUID_STR_LEN + 1];
     uint8_t avatar_skin, avatar_hair;
 
+    /* Serializes writes to ->ssl. A match's two threads both write to both
+     * connections - a chat relay or a board broadcast goes out on the OTHER
+     * player's SSL, from this player's thread - and two threads inside
+     * SSL_write on one SSL object mangles the record stream, which OpenSSL
+     * reports as "tlsv1 alert internal error". Reproduced by
+     * test/server_probe.mjs.
+     *
+     * Lock order: m->lock is released before this is taken, and m->lock is
+     * never taken while holding it. Sends therefore stay outside m->lock, so a
+     * peer that has stopped reading stalls only writes to itself rather than
+     * its opponent's whole thread. */
+    pthread_mutex_t write_lock;
+
     pthread_mutex_t state_lock;
+    /* Guarded by state_lock: the owning thread holds one reference, and any
+     * thread that pulls this connection out of a match slot in order to write
+     * to it holds another for as long as it writes. Without that, the owner
+     * can return and free the connection between another thread reading
+     * m->conns[i] and using it. */
+    int refcount;
     struct Match *assigned_match; /* set by whichever thread completes the pairing */
     int assigned_player_index;
 } Connection;
@@ -105,19 +124,49 @@ static Connection *connection_new(SSL *ssl, int fd, PeerAddr ip)
     c->fd = fd;
     c->ip = ip;
     pthread_mutex_init(&c->state_lock, NULL);
+    pthread_mutex_init(&c->write_lock, NULL);
+    c->refcount = 1; /* the owning thread's reference */
     return c;
 }
 
-static void connection_free(Connection *c)
+static void connection_ref(Connection *c)
+{
+    pthread_mutex_lock(&c->state_lock);
+    c->refcount++;
+    pthread_mutex_unlock(&c->state_lock);
+}
+
+static void connection_unref(Connection *c)
 {
     if (!c) return;
+    pthread_mutex_lock(&c->state_lock);
+    int rc = --c->refcount;
+    pthread_mutex_unlock(&c->state_lock);
+    if (rc > 0)
+        return;
+
     if (c->ssl) {
         SSL_shutdown(c->ssl);
         SSL_free(c->ssl);
     }
     if (c->fd >= 0) close(c->fd);
+    pthread_mutex_destroy(&c->write_lock);
     pthread_mutex_destroy(&c->state_lock);
     free(c);
+}
+
+/*
+ * The only way anything is written to a client. Every send goes through here,
+ * not just the cross-thread ones: uniformity is what stops the next one added
+ * from being the one that forgets the lock.
+ */
+static bool conn_send(Connection *c, uint8_t type, const uint8_t *payload, size_t len)
+{
+    if (!c) return false;
+    pthread_mutex_lock(&c->write_lock);
+    bool ok = net_send_frame(c->ssl, type, payload, len);
+    pthread_mutex_unlock(&c->write_lock);
+    return ok;
 }
 
 /* ---------------- match ---------------- */
@@ -142,6 +191,34 @@ typedef struct Match {
                               * stale "both agreed" from a prior round can't
                               * be mistaken for a fresh one */
 } Match;
+
+static Connection *match_peer_ref(struct Match *m, int slot)
+{
+    Connection *c = m->connected[slot] ? m->conns[slot] : NULL;
+    if (c)
+        connection_ref(c);
+    return c;
+}
+
+/*
+ * The owning thread leaving a match, so that nothing can reach its connection
+ * through m->conns[] once it drops its reference. Only the mid-match
+ * disconnect path used to clear the slot; a match that ended normally left
+ * conns[] pointing at a connection its owner was about to free, which the
+ * opponent's thread could then pick up to broadcast to.
+ *
+ * Guarded on identity: if a reconnecting thread has already taken this slot
+ * over, its connection must stay.
+ */
+static void match_detach(struct Match *m, int slot, Connection *conn)
+{
+    pthread_mutex_lock(&m->lock);
+    if (m->conns[slot] == conn) {
+        m->conns[slot] = NULL;
+        m->connected[slot] = false;
+    }
+    pthread_mutex_unlock(&m->lock);
+}
 
 typedef struct {
     bool used;
@@ -445,7 +522,7 @@ static void send_error(Connection *c, ErrorCode code, const char *msg)
     strncpy(m.message, msg, NET_ERR_MSG_LEN - 1);
     uint8_t buf[NET_MAX_PAYLOAD];
     size_t n = pack_error(buf, &m);
-    net_send_frame(c->ssl, MSG_ERROR, buf, n);
+    conn_send(c, MSG_ERROR, buf, n);
 }
 
 static void sanitize_name(char *name)
@@ -489,8 +566,8 @@ static void broadcast_board_state(Match *m)
     board_to_wire(&m->board, mines_left, scores, 0, &wire);
     stamp_flag_owners(&m->board, m->flags, &wire);
     MsgTurn turn = { .player_id_to_move = (uint8_t)m->player_to_move };
-    Connection *c0 = m->connected[0] ? m->conns[0] : NULL;
-    Connection *c1 = m->connected[1] ? m->conns[1] : NULL;
+    Connection *c0 = match_peer_ref(m, 0);
+    Connection *c1 = match_peer_ref(m, 1);
     pthread_mutex_unlock(&m->lock);
 
     uint8_t buf[NET_MAX_PAYLOAD];
@@ -498,8 +575,8 @@ static void broadcast_board_state(Match *m)
     uint8_t tbuf[8];
     size_t tn = pack_turn(tbuf, &turn);
 
-    if (c0) { net_send_frame(c0->ssl, MSG_BOARD_STATE, buf, n); net_send_frame(c0->ssl, MSG_TURN, tbuf, tn); }
-    if (c1) { net_send_frame(c1->ssl, MSG_BOARD_STATE, buf, n); net_send_frame(c1->ssl, MSG_TURN, tbuf, tn); }
+    if (c0) { conn_send(c0, MSG_BOARD_STATE, buf, n); conn_send(c0, MSG_TURN, tbuf, tn); connection_unref(c0); }
+    if (c1) { conn_send(c1, MSG_BOARD_STATE, buf, n); conn_send(c1, MSG_TURN, tbuf, tn); connection_unref(c1); }
 }
 
 /* Sends the current snapshot to exactly one connection - used when a
@@ -521,22 +598,22 @@ static void send_board_state_to(Connection *conn, Match *m)
     size_t n = pack_board_state(buf, &wire);
     uint8_t tbuf[8];
     size_t tn = pack_turn(tbuf, &turn);
-    net_send_frame(conn->ssl, MSG_BOARD_STATE, buf, n);
-    net_send_frame(conn->ssl, MSG_TURN, tbuf, tn);
+    conn_send(conn, MSG_BOARD_STATE, buf, n);
+    conn_send(conn, MSG_TURN, tbuf, tn);
 }
 
 static void send_match_end(Match *m, MatchEndReason reason)
 {
     pthread_mutex_lock(&m->lock);
     MsgMatchEnd me = { .reason = (uint8_t)reason, .scores = { m->scores[0], m->scores[1] } };
-    Connection *c0 = m->connected[0] ? m->conns[0] : NULL;
-    Connection *c1 = m->connected[1] ? m->conns[1] : NULL;
+    Connection *c0 = match_peer_ref(m, 0);
+    Connection *c1 = match_peer_ref(m, 1);
     pthread_mutex_unlock(&m->lock);
 
     uint8_t buf[32];
     size_t n = pack_match_end(buf, &me);
-    if (c0) net_send_frame(c0->ssl, MSG_MATCH_END, buf, n);
-    if (c1) net_send_frame(c1->ssl, MSG_MATCH_END, buf, n);
+    if (c0) { conn_send(c0, MSG_MATCH_END, buf, n); connection_unref(c0); }
+    if (c1) { conn_send(c1, MSG_MATCH_END, buf, n); connection_unref(c1); }
 }
 
 /* Applies a validated reveal/chord/flag action. Returns true if the turn
@@ -648,6 +725,8 @@ static void apply_action_and_broadcast(Match *m, int player_index, uint8_t type,
     if (match_ended)
         m->active = false;
 
+    /* The caller's OWN slot, so it is alive by definition and needs no
+     * reference - it cannot be detached while its own thread is in here. */
     Connection *rejecting_conn = rejected ? m->conns[player_index] : NULL;
     char name0[NET_MAX_NAME_LEN + 1], name1[NET_MAX_NAME_LEN + 1];
     int final_scores[2] = { m->scores[0], m->scores[1] };
@@ -684,7 +763,7 @@ static void relay_chat(Match *m, int player_index, const uint8_t *payload, size_
         return;
 
     pthread_mutex_lock(&m->lock);
-    Connection *opponent = m->connected[1 - player_index] ? m->conns[1 - player_index] : NULL;
+    Connection *opponent = match_peer_ref(m, 1 - player_index);
     pthread_mutex_unlock(&m->lock);
 
     if (!opponent)
@@ -695,7 +774,8 @@ static void relay_chat(Match *m, int player_index, const uint8_t *payload, size_
     out.text[NET_CHAT_MSG_LEN] = '\0';
     uint8_t buf[NET_MAX_PAYLOAD];
     size_t n = pack_chat_recv(buf, &out);
-    net_send_frame(opponent->ssl, MSG_CHAT_RECV, buf, n);
+    conn_send(opponent, MSG_CHAT_RECV, buf, n);
+    connection_unref(opponent);
 }
 
 /* Waits up to RECONNECT_GRACE_SECONDS for the given player slot to
@@ -743,7 +823,7 @@ static bool play_match(Connection *conn, Match *m, int player_index)
             pthread_mutex_lock(&m->lock);
             m->connected[player_index] = false;
             m->disconnected_at[player_index] = time(NULL);
-            Connection *opponent = m->connected[1 - player_index] ? m->conns[1 - player_index] : NULL;
+            Connection *opponent = match_peer_ref(m, 1 - player_index);
             pthread_mutex_unlock(&m->lock);
 
             log_line("%s disconnected mid-match; waiting up to %ds for reconnect",
@@ -753,7 +833,8 @@ static bool play_match(Connection *conn, Match *m, int player_index)
                 MsgOpponentStatus st = { .state = OPP_DISCONNECTED, .grace_seconds = RECONNECT_GRACE_SECONDS };
                 uint8_t buf[8];
                 size_t n = pack_opponent_status(buf, &st);
-                net_send_frame(opponent->ssl, MSG_OPPONENT_STATUS, buf, n);
+                conn_send(opponent, MSG_OPPONENT_STATUS, buf, n);
+                connection_unref(opponent);
             }
 
             bool came_back = wait_for_reconnect(m, player_index);
@@ -773,7 +854,7 @@ static bool play_match(Connection *conn, Match *m, int player_index)
         }
 
         if (frame.type == MSG_PING) {
-            net_send_frame(conn->ssl, MSG_PONG, NULL, 0);
+            conn_send(conn, MSG_PONG, NULL, 0);
             continue;
         }
         if (frame.type == MSG_ACTION_REVEAL || frame.type == MSG_ACTION_FLAG || frame.type == MSG_ACTION_CHORD) {
@@ -808,7 +889,7 @@ static void send_match_start(Connection *conn, Match *m, int player_index)
 
     uint8_t buf[NET_MAX_PAYLOAD];
     size_t n = pack_match_start(buf, &ms);
-    net_send_frame(conn->ssl, MSG_MATCH_START, buf, n);
+    conn_send(conn, MSG_MATCH_START, buf, n);
 }
 
 /* Called after play_match() returns true (the match concluded with this
@@ -891,7 +972,7 @@ static bool try_rematch(Connection *conn, Match *m, int player_index)
             continue;
         }
         if (frame.type == MSG_PING) {
-            net_send_frame(conn->ssl, MSG_PONG, NULL, 0);
+            conn_send(conn, MSG_PONG, NULL, 0);
             continue;
         }
         /* ignore anything else (an action for a match that is over) */
@@ -950,7 +1031,7 @@ static void handle_connection(Connection *conn)
         uint8_t opp_avatar_hair = m->avatar_hair[1 - player_index];
         uint8_t w = (uint8_t)m->board.w, h = (uint8_t)m->board.h;
         uint16_t mines = (uint16_t)m->board.mines;
-        Connection *opponent = active && m->connected[1 - player_index] ? m->conns[1 - player_index] : NULL;
+        Connection *opponent = active ? match_peer_ref(m, 1 - player_index) : NULL;
         pthread_mutex_unlock(&m->lock);
 
         if (!active) {
@@ -968,13 +1049,14 @@ static void handle_connection(Connection *conn)
         strncpy(ok.opponent_name, opp_name, NET_MAX_NAME_LEN);
         uint8_t buf[NET_MAX_PAYLOAD];
         size_t n = pack_reconnect_ok(buf, &ok);
-        net_send_frame(conn->ssl, MSG_RECONNECT_OK, buf, n);
+        conn_send(conn, MSG_RECONNECT_OK, buf, n);
 
         if (opponent) {
             MsgOpponentStatus st = { .state = OPP_RECONNECTED, .grace_seconds = 0 };
             uint8_t sbuf[8];
             size_t sn = pack_opponent_status(sbuf, &st);
-            net_send_frame(opponent->ssl, MSG_OPPONENT_STATUS, sbuf, sn);
+            conn_send(opponent, MSG_OPPONENT_STATUS, sbuf, sn);
+            connection_unref(opponent);
         }
 
         send_board_state_to(conn, m);
@@ -984,6 +1066,7 @@ static void handle_connection(Connection *conn)
             send_match_start(conn, m, player_index);
             send_board_state_to(conn, m);
         }
+        match_detach(m, player_index, conn);
         match_release(m);
         return;
     }
@@ -1036,7 +1119,7 @@ static void handle_connection(Connection *conn)
     MsgWelcome welcome = { .protocol_version = NET_PROTO_VERSION, .player_id = 0 };
     uint8_t wbuf[8];
     size_t wn = pack_welcome(wbuf, &welcome);
-    net_send_frame(conn->ssl, MSG_WELCOME, wbuf, wn);
+    conn_send(conn, MSG_WELCOME, wbuf, wn);
 
     int position = queue_join_and_maybe_pair(conn);
 
@@ -1060,6 +1143,7 @@ static void handle_connection(Connection *conn)
                     send_match_start(conn, m, pidx);
                     send_board_state_to(conn, m);
                 }
+                match_detach(m, pidx, conn);
                 match_release(m);
                 return;
             }
@@ -1073,7 +1157,7 @@ static void handle_connection(Connection *conn)
                 return;
             }
             if (r == NET_OK && f.type == MSG_PING)
-                net_send_frame(conn->ssl, MSG_PONG, NULL, 0);
+                conn_send(conn, MSG_PONG, NULL, 0);
             /* MSG_QUEUE_STATUS updates are a nice-to-have; v1 keeps the
              * waiting screen simple and doesn't push periodic position
              * updates - the client just shows "Waiting for opponent...". */
@@ -1095,6 +1179,7 @@ static void handle_connection(Connection *conn)
             send_match_start(conn, m, pidx);
             send_board_state_to(conn, m);
         }
+        match_detach(m, pidx, conn);
         match_release(m);
     }
 }
@@ -1135,7 +1220,7 @@ static void *client_thread(void *arg)
 
     Connection *conn = connection_new(ssl, ta->client_fd, ta->ip);
     handle_connection(conn);
-    connection_free(conn);
+    connection_unref(conn); /* another thread may still be writing to it */
 
     pthread_mutex_lock(&g_active_connections_lock);
     g_active_connections--;
@@ -1216,6 +1301,20 @@ static int make_listener(int family, int port)
 
 int main(int argc, char **argv)
 {
+    /* A write to a socket whose peer has gone raises SIGPIPE, and its default
+     * disposition terminates the process - in a thread-per-connection server,
+     * that means one stranger's dropped connection kills every match in
+     * progress. net_send_frame issues two SSL_write calls per frame, so a peer
+     * that stops reading and then resets parks a thread in write() and takes
+     * the whole server down when it returns. Found exactly that way by
+     * test/server_probe.mjs, which reproduces it deterministically.
+     *
+     * Ignoring it is what every network server must do, not a workaround: the
+     * failure then surfaces as a return value, which the code already handles
+     * - SSL_write returns <= 0, ssl_write_all and net_send_frame return false,
+     * and the caller closes the connection. */
+    signal(SIGPIPE, SIG_IGN);
+
     const char *cert_path = NULL, *key_path = NULL;
     int port = 4443;
     unsigned seed = (unsigned)time(NULL);

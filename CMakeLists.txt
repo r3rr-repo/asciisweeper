@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(asciisweeper VERSION 0.13 LANGUAGES C)
+project(asciisweeper VERSION 0.14 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -70,3 +70,17 @@ target_link_libraries(config-test PRIVATE ${CURSES_LIBRARIES} OpenSSL::Crypto)
 
 add_executable(netaddr-test EXCLUDE_FROM_ALL test/netaddr_test.c src/netaddr.c)
 target_include_directories(netaddr-test PRIVATE src)
+
+# The other four tests are pure functions. This one is the opposite: it starts
+# the real server with a throwaway certificate and attacks it over raw TLS with
+# clients that misbehave on purpose - vanishing mid-write, stalling until the
+# server's write blocks, forcing two threads onto one SSL. Needs node.
+#
+#   cmake --build build --target probe-test
+add_custom_target(probe-test
+    COMMAND ${CMAKE_COMMAND} -E env
+            SERVER_BIN=$<TARGET_FILE:asciisweeper-server>
+            node ${CMAKE_SOURCE_DIR}/test/server_probe.mjs
+    DEPENDS asciisweeper-server
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    USES_TERMINAL)

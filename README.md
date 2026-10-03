@@ -269,6 +269,23 @@ If your connection drops mid-match, the client automatically tries to
 reconnect using your session token for up to 60 seconds before giving up
 and returning to the menu.
 
+**Tests.** Four unit targets over the pure logic, plus a probe suite that
+starts the real server and attacks it with clients that misbehave on purpose:
+
+```sh
+cmake --build build --target score-test uuid-test config-test netaddr-test
+./build/score-test && ./build/uuid-test && ./build/config-test && ./build/netaddr-test
+
+cmake --build build --target probe-test     # needs node
+```
+
+The probes exist because a stranger used to be able to kill the whole server
+without playing a game: a peer that stops reading until the server's write
+blocks, and then drops, raised `SIGPIPE` in whichever thread was writing to it,
+which by default takes the process — and every match on it — down.
+[`test/server_probe.mjs`](test/server_probe.mjs) reproduces that, and the
+two-threads-on-one-`SSL` collision that used to corrupt the TLS stream.
+
 When a match ends you stay on the result screen for as long as you like —
 chat with `t`, offer a rematch with `r`. Asking for a rematch also posts
 "wants a rematch" to the chat, so your opponent sees it whether or not
@@ -285,7 +302,7 @@ multiplayer modes.
 ```sh
 ./build-web.sh          # -> web/dist/, static files, copy to a docroot
 ./build-web.sh --serve  # dev server, for playing locally
-./build-web.sh --test   # typecheck + 695 tests
+./build-web.sh --test   # typecheck + 941 tests
 ./build-web.sh --card   # regenerate the social card and icons
 ```
 

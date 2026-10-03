@@ -329,11 +329,13 @@ try {
 
   // ---- play to a finish --------------------------------------------------
   // Strictly turn-by-turn, the way real clients behave. An earlier version of
-  // this test fired reveals from both clients at once and tripped a
-  // PRE-EXISTING race in the server: broadcast_board_state sends outside the
-  // match lock with no per-connection write mutex, so two threads can call
-  // net_send_frame on the same SSL* and OpenSSL raises "tlsv1 alert internal
-  // error". Not introduced here, but worth knowing it is reachable.
+  // this test fired reveals from both clients at once and tripped a race in
+  // the server: broadcast_board_state sent outside the match lock with no
+  // per-connection write mutex, so two threads could call net_send_frame on
+  // the same SSL* and OpenSSL raised "tlsv1 alert internal error". Fixed -
+  // Connection now carries a write_lock and is reference-counted, and
+  // test/server_probe.mjs provokes that collision on purpose. This test stays
+  // turn-by-turn because that is what real clients do, not to dodge it.
   const drainTurn = (cl, core) => {
     const ix = cl.frames.map((f) => f.type).lastIndexOf(MSG.TURN);
     if (ix < 0) return null;

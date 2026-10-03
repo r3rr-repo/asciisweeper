@@ -11,6 +11,7 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <sys/select.h>
+#include <signal.h>
 
 #include "board.h"
 #include "net_proto.h"
@@ -1300,6 +1301,13 @@ int main(int argc, char **argv)
             return 0;
         }
     }
+
+    /* Same reason as the server (see src/server.c), with a different symptom:
+     * a SIGPIPE here kills the process without ever reaching endwin(), so a
+     * server going away mid-write would leave the player staring at a terminal
+     * still in raw mode. Ignored, the write fails, net_send_frame returns false
+     * and the existing "connection lost" path runs. */
+    signal(SIGPIPE, SIG_IGN);
 
     srand((unsigned)time(NULL));
 
