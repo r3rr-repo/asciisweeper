@@ -219,6 +219,33 @@ The server needs a real TLS certificate and key (e.g. from Let's Encrypt
 for a public server, or a self-signed one for local testing — see below).
 It matches players FIFO: the first two to queue up get paired together.
 
+To run it as a service rather than from a shell, there is a systemd unit and a
+FreeBSD `rc.d` script in [`web/deploy/`](web/deploy/), alongside the bridge's:
+
+```sh
+# Linux
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin asciisweeper
+sudo cp web/deploy/asciisweeper-server.service /etc/systemd/system/
+sudoedit /etc/systemd/system/asciisweeper-server.service   # --cert/--key paths
+sudo systemctl enable --now asciisweeper-server
+
+# FreeBSD
+sudo install -m 555 web/deploy/asciisweeper-server.rc \
+  /usr/local/etc/rc.d/asciisweeper_server
+sudo sysrc asciisweeper_server_enable="YES"
+sudo sysrc asciisweeper_server_cert="/usr/local/etc/.../fullchain.pem"
+sudo sysrc asciisweeper_server_key="/usr/local/etc/.../privkey.pem"
+sudo service asciisweeper_server start
+```
+
+Both run it as an unprivileged `asciisweeper` account, which means **the private
+key has to be readable by that account** — a Let's Encrypt `privkey.pem` is
+root-only as installed. The server reads it once, at startup, and never drops
+privileges because on port 4443 it never needs any. So also **restart the
+service after each renewal**, or the old certificate stays loaded until you do.
+[`web/deploy/README.md`](web/deploy/README.md) has the three ways to arrange the
+key permissions.
+
 **Connect a client:** choose "Multiplayer..." from the menu and enter the
 server's host, port, your name, and (optionally) a CA file. The CA file
 lets you pin a specific certificate authority — useful for a self-hosted

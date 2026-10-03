@@ -1,0 +1,79 @@
+# systemd unit for the asciisweeper game server (the TLS server the terminal
+# client and the bridge both dial into).
+#
+#   sudo cp asciisweeper-server.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now asciisweeper-server
+#
+# Adjust ExecStart's --cert/--key paths and the port to match the host.
+#
+# The one thing to get right: the server reads the certificate and private key
+# at startup and never drops privileges, because it does not need any - port
+# 4443 is unprivileged. So the KEY must be readable by User= below, and a
+# Let's Encrypt privkey.pem is root-only by default. Three ways, best first:
+#
+#   1. LoadCredential (systemd 247+): systemd reads the files as root and
+#      places copies in $CREDENTIALS_DIRECTORY, readable only by this service.
+#      Nothing on disk changes. Shown commented out below.
+#   2. A group: chgrp asciisweeper the live/archive privkey and chmod 640.
+#      Survives renewal only if your renewal hook re-applies it.
+#   3. A deploy hook that copies cert+key somewhere owned by asciisweeper.
+#
+# Either way, restart this unit after renewal - the server reads the key once,
+# at startup, so a renewed certificate is not picked up until it restarts.
+
+[Unit]
+Description=asciisweeper multiplayer game server
+Documentation=https://github.com/r3rr-repo/asciisweeper
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=asciisweeper
+Group=asciisweeper
+
+ExecStart=/usr/local/bin/asciisweeper-server \
+  --cert /etc/letsencrypt/live/s1.example.com/fullchain.pem \
+  --key /etc/letsencrypt/live/s1.example.com/privkey.pem \
+  --port 4443
+
+# Option 1 above. Uncomment these, point ExecStart at the credential copies
+# instead, and leave the originals root-owned:
+#LoadCredential=cert:/etc/letsencrypt/live/s1.example.com/fullchain.pem
+#LoadCredential=key:/etc/letsencrypt/live/s1.example.com/privkey.pem
+#ExecStart=/usr/local/bin/asciisweeper-server \
+#  --cert ${CREDENTIALS_DIRECTORY}/cert \
+#  --key ${CREDENTIALS_DIRECTORY}/key \
+#  --port 4443
+
+# always, not on-failure: the server has no clean exit path - it runs its accept
+# loop until killed - so any exit at all is a crash worth restarting from.
+Restart=always
+RestartSec=2
+
+# It listens on a port and reads two files; it writes nothing and runs no
+# subprocesses.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+CapabilityBoundingSet=
+# Only needed to bind a port below 1024, e.g. --port 443:
+#AmbientCapabilities=CAP_NET_BIND_SERVICE
+#CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+ReadOnlyPaths=/etc/letsencrypt
+
+# One thread per connection, MAX_CONNECTIONS is 500 (src/server.c), plus the
+# accept loop. Headroom over that, and a ceiling if a thread leak ever appears.
+TasksMax=600
+
+# Logging is unbuffered lines on stderr, so the journal gets them live:
+#   journalctl -u asciisweeper-server -f
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

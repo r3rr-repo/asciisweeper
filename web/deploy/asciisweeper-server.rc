@@ -1,0 +1,156 @@
+#!/bin/sh
+#
+# FreeBSD rc.d script for the asciisweeper game server - the TLS server that the
+# terminal client and the WebSocket bridge both dial into.
+#
+# Install:
+#   install -m 555 asciisweeper-server.rc /usr/local/etc/rc.d/asciisweeper_server
+#
+# Configure in /etc/rc.conf (or /etc/rc.conf.d/asciisweeper_server):
+#
+#   asciisweeper_server_enable="YES"
+#   asciisweeper_server_cert="/usr/local/etc/letsencrypt/live/s1.example.com/fullchain.pem"
+#   asciisweeper_server_key="/usr/local/etc/letsencrypt/live/s1.example.com/privkey.pem"
+#
+# then:
+#   service asciisweeper_server start
+#   service asciisweeper_server status
+#
+# _cert and _key are required and have no sensible default. The server reads
+# both at startup, as asciisweeper_server_runas - it never runs as root and
+# never drops privileges, because on the default port 4443 it needs neither. A
+# Let's Encrypt privkey.pem is root-only, so it must be made readable by that
+# account; the script warns at startup if it looks like it is not. And restart
+# the service after each renewal: the key is read once, at startup.
+#
+# PROVIDE: asciisweeper_server
+# REQUIRE: LOGIN NETWORKING
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="asciisweeper_server"
+rcvar="asciisweeper_server_enable"
+desc="asciisweeper multiplayer game server"
+
+load_rc_config "$name"
+
+: ${asciisweeper_server_enable:="NO"}
+# A dedicated account, shared with the bridge and with the systemd units. Point
+# it at an existing account with sysrc if you prefer.
+#
+# NOT asciisweeper_server_user: ${name}_user is reserved by rc.subr, which uses
+# it to run $command itself as that user. daemon(8) would then no longer be root
+# and its own -u would fail with "failed to set user environment".
+: ${asciisweeper_server_runas:="asciisweeper"}
+: ${asciisweeper_server_bin:="/usr/local/bin/asciisweeper-server"}
+: ${asciisweeper_server_cert:=""}
+: ${asciisweeper_server_key:=""}
+: ${asciisweeper_server_port:="4443"}
+: ${asciisweeper_server_logfile:="/var/log/asciisweeper-server.log"}
+
+# The SUPERVISOR's pid, deliberately. daemon(8) is started with -r, so killing
+# the child just makes it respawn and "service stop" would never stop anything.
+# Signalling the supervisor makes it terminate the child and exit. procname is
+# therefore left to default to $command.
+pidfile="/var/run/${name}.pid"
+command="/usr/sbin/daemon"
+
+start_precmd="asciisweeper_server_precmd"
+
+# The server reads cert and key as ${runas}, so a root-only key fails with an
+# OpenSSL error that says nothing about permissions. Catch the obvious cases
+# here. A warning, not an error: the account may reach the file through a
+# secondary group, which this cannot see.
+asciisweeper_server_check_readable()
+{
+	_f="$1"
+	_what="$2"
+	[ -f "${_f}" ] || err 1 "${_what} not found: ${_f}"
+
+	_m=$(stat -f '%OLp' "${_f}" 2>/dev/null) || return 0
+	_o=$(stat -f '%Su' "${_f}" 2>/dev/null)
+	_g=$(stat -f '%Sg' "${_f}" 2>/dev/null)
+
+	case "${_m}" in
+	*[4567]) return 0 ;;	# world-readable, nothing to say
+	esac
+	[ "${_o}" = "${asciisweeper_server_runas}" ] && return 0
+	[ "${_g}" = "${_server_group}" ] && return 0
+
+	warn "${_what} ${_f} is ${_o}:${_g} mode ${_m}; '${asciisweeper_server_runas}' probably cannot read it:
+  chgrp ${_server_group} ${_f} && chmod 640 ${_f}
+Re-apply after every renewal, or have the renewal hook copy cert and key
+somewhere ${asciisweeper_server_runas} owns."
+}
+
+asciisweeper_server_precmd()
+{
+	# Renaming the variable did not delete the old one, and _user is what a
+	# FreeBSD habit reaches for first. rc.subr honours ${name}_user whatever
+	# this script calls its own variable: it runs daemon(8) as that user, after
+	# which daemon cannot drop privileges and exits with "failed to set user
+	# environment". Nothing downstream recovers from it, so name the fix.
+	if [ -n "${asciisweeper_server_user}" ]; then
+		err 1 "asciisweeper_server_user=\"${asciisweeper_server_user}\" is set in rc.conf, and \${name}_user is reserved by rc.subr.
+It makes rc.subr run daemon(8) as that user, so daemon cannot drop privileges and exits with
+\"failed to set user environment\". Remove it and use asciisweeper_server_runas instead:
+  sysrc -x asciisweeper_server_user
+  sysrc asciisweeper_server_runas=\"${asciisweeper_server_user}\"   # only if you do not want the default"
+	fi
+
+	if ! id -u "${asciisweeper_server_runas}" >/dev/null 2>&1; then
+		err 1 "user '${asciisweeper_server_runas}' does not exist - create it with:
+  pw useradd ${asciisweeper_server_runas} -d /nonexistent -s /usr/sbin/nologin -c 'asciisweeper'
+or point asciisweeper_server_runas at an existing account"
+	fi
+	# Ask for the account's actual primary group rather than assuming it shares
+	# the user's name: true for an account made by pw useradd, not for www.
+	_server_group=$(id -gn "${asciisweeper_server_runas}" 2>/dev/null) || _server_group=""
+	: ${_server_group:="${asciisweeper_server_runas}"}
+
+	if [ ! -x "${asciisweeper_server_bin}" ]; then
+		err 1 "asciisweeper-server not found at ${asciisweeper_server_bin} (build it, or set asciisweeper_server_bin)"
+	fi
+	if [ -z "${asciisweeper_server_cert}" ] || [ -z "${asciisweeper_server_key}" ]; then
+		err 1 "asciisweeper_server_cert and asciisweeper_server_key are required:
+  sysrc asciisweeper_server_cert=\"/usr/local/etc/letsencrypt/live/s1.example.com/fullchain.pem\"
+  sysrc asciisweeper_server_key=\"/usr/local/etc/letsencrypt/live/s1.example.com/privkey.pem\""
+	fi
+	asciisweeper_server_check_readable "${asciisweeper_server_cert}" "certificate"
+	asciisweeper_server_check_readable "${asciisweeper_server_key}" "private key"
+
+	# Create only when missing - installing /dev/null over it would truncate the
+	# log on every restart - but always re-own it, so changing the runas user
+	# does not leave behind a log the new user cannot write.
+	if [ ! -e "${asciisweeper_server_logfile}" ]; then
+		install -o "${asciisweeper_server_runas}" -g "${_server_group}" \
+			-m 640 /dev/null "${asciisweeper_server_logfile}" 2>/dev/null || true
+	else
+		chown "${asciisweeper_server_runas}:${_server_group}" \
+			"${asciisweeper_server_logfile}" 2>/dev/null || true
+	fi
+
+	# daemon(8) does the backgrounding, pidfile, user drop and restart-on-exit
+	# that systemd would otherwise handle.
+	#   -f  redirect stdio away from the terminal
+	#   -r  restart if it exits - the server has no clean exit path, so any
+	#       exit at all is a crash worth restarting from
+	#   -P  supervisor pidfile (what rc stops), -p child pidfile
+	#   -u  run as an unprivileged user
+	#   -o  append output to a log file
+	# A local name, NOT rc_flags - that one belongs to rc.subr, which passes it
+	# to $command separately.
+	#
+	# daemon's -t title must be a single word: command_args is word-split when
+	# rc.subr invokes $command, so a title containing spaces would spill over and
+	# be taken as the command to run.
+	_daemon_args="-f -r -t ${name} -P ${pidfile} -p /var/run/${name}.child.pid"
+	_daemon_args="${_daemon_args} -u ${asciisweeper_server_runas} -o ${asciisweeper_server_logfile}"
+	command_args="${_daemon_args} ${asciisweeper_server_bin}"
+	command_args="${command_args} --cert ${asciisweeper_server_cert}"
+	command_args="${command_args} --key ${asciisweeper_server_key}"
+	command_args="${command_args} --port ${asciisweeper_server_port}"
+}
+
+run_rc_command "$1"

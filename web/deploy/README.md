@@ -9,21 +9,64 @@ Keeping the steps in one place stops the two from drifting.
 
 | File | Purpose |
 |---|---|
-| `asciisweeper-bridge.service` | systemd unit. Runs as `asciisweeper`; edit `WorkingDirectory` and the upstream flags. |
-| `asciisweeper-bridge.rc` | FreeBSD `rc.d` script. Configured through `rc.conf`, not by editing it. |
+| `asciisweeper-server.service` | systemd unit for the game server. Runs as `asciisweeper`; edit the `--cert`/`--key` paths. |
+| `asciisweeper-server.rc` | FreeBSD `rc.d` script for the game server. Configured through `rc.conf`. |
+| `asciisweeper-bridge.service` | systemd unit for the bridge. Runs as `asciisweeper`; edit `WorkingDirectory` and the upstream flags. |
+| `asciisweeper-bridge.rc` | FreeBSD `rc.d` script for the bridge. Configured through `rc.conf`, not by editing it. |
 | `Caddyfile.example` | Caddy: static files plus the `/ws` route. |
 | `nginx.conf.example` | nginx equivalent, including the `.wasm` media type and the read timeout. |
 
-Neither is required. The bridge is a foreground process that logs to stdout and
-exits on `SIGTERM`, so any supervisor will do — runit, s6, OpenRC, a jail's own
-init, or nothing at all while you are trying it out:
+None of them is required. Both the server and the bridge are foreground
+processes that log lines to stderr and die on `SIGTERM`, so any supervisor will
+do — runit, s6, OpenRC, a jail's own init, or nothing at all while you are
+trying it out:
 
 ```sh
+asciisweeper-server --cert fullchain.pem --key privkey.pem --port 4443
+
 node web/bridge/bridge.mjs --bind 127.0.0.1 --listen 8080 \
   --upstream 127.0.0.1:4443 --servername yourdomain.com
 ```
 
-## FreeBSD
+| Variable | Default |
+|---|---|
+| `asciisweeper_server_enable` | `NO` |
+| `asciisweeper_server_runas` | `asciisweeper` |
+| `asciisweeper_server_bin` | `/usr/local/bin/asciisweeper-server` |
+| `asciisweeper_server_cert` | *(required)* |
+| `asciisweeper_server_key` | *(required)* |
+| `asciisweeper_server_port` | `4443` |
+| `asciisweeper_server_logfile` | `/var/log/asciisweeper-server.log` |
+
+Both services restart the process if it exits — `Restart=always` and `daemon -r`.
+That is deliberate rather than cautious: the server has no clean exit path, it
+runs its accept loop until killed, so any exit at all is a crash.
+
+### The private key must be readable by `asciisweeper`
+
+This is the one thing that will stop the server starting. It reads the
+certificate and key at startup, as the service account, and never drops
+privileges — on port 4443 it needs none to begin with. A Let's Encrypt
+`privkey.pem` is `root:root 600` as installed, and OpenSSL's failure says
+nothing about permissions. Three ways, best first:
+
+1. **`LoadCredential=`** (systemd 247+): systemd reads the files as root and
+   places copies in `$CREDENTIALS_DIRECTORY`, readable only by this service.
+   Nothing on disk changes. Commented out in the unit, ready to use.
+2. **A group:** `chgrp asciisweeper` the key and `chmod 640`. Re-apply after
+   every renewal — certbot replaces the file — so put it in a renewal hook.
+3. **A deploy hook** that copies cert and key somewhere `asciisweeper` owns.
+
+The `rc.d` script checks for this at startup and warns with the `chgrp` line if
+the key looks unreadable. It cannot be certain — the account may reach the file
+through a secondary group — so it warns rather than refusing to start.
+
+**Restart after renewal either way.** The key is read once, at startup, so a
+renewed certificate is not served until the service restarts. In a certbot
+`--deploy-hook`: `service asciisweeper_server restart` or
+`systemctl restart asciisweeper-server`.
+
+## The bridge, on FreeBSD
 
 ```sh
 pkg install node npm
@@ -171,3 +214,5 @@ The middle one is the real check: it drives two clients through the deployed
 bridge into the deployed server using the same wasm codec the browser uses. It
 queues two players on the live server for a few seconds, so run it when nobody is
 waiting for a match.
+| Server exits at startup with an OpenSSL error about the key or `PEM routines` | the key is not readable by `asciisweeper` — see above |
+| Clients get the old certificate after a renewal | the server reads it once at startup; restart it from a deploy hook |
