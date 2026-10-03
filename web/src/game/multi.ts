@@ -32,6 +32,12 @@ import { Blink } from "./blink";
 import { WsConn } from "../net/wsconn";
 import type { BoardView } from "../draw/board";
 
+/**
+ * Rows multiplayer draws below main.c's h+8 block: status at +5, chat at +6..+8,
+ * composer at +9. Reserved so centring keeps them on screen.
+ */
+const MP_EXTRA_ROWS = 6;
+
 /** src/main.c:794-798 - 20 attempts, 3 s apart, i.e. the server's 60 s grace. */
 const RECONNECT_ATTEMPTS = 20;
 const RECONNECT_DELAY_MS = 3000;
@@ -294,7 +300,7 @@ export class Multiplayer {
   // ------------------------------------------------------------------- render
 
   private boardView(s: Surface): BoardView {
-    const l = computeLayout(this.boardW, this.boardH, s.cols, s.rows, true);
+    const l = computeLayout(this.boardW, this.boardH, s.cols, s.rows, true, MP_EXTRA_ROWS);
     return {
       cells: this.cells, w: this.boardW, h: this.boardH,
       status: this.status, explodedX: this.explodedX, explodedY: this.explodedY,
@@ -307,7 +313,7 @@ export class Multiplayer {
   }
 
   private view(s: Surface): MpView {
-    const l = computeLayout(this.boardW, this.boardH, s.cols, s.rows, true);
+    const l = computeLayout(this.boardW, this.boardH, s.cols, s.rows, true, MP_EXTRA_ROWS);
     return {
       board: this.boardView(s),
       sidePanelsFit: l.sidePanelsFit,
@@ -484,7 +490,7 @@ export class Multiplayer {
   }
 
   private toBoard(s: Surface, row: number, col: number): { x: number; y: number } | null {
-    const l = computeLayout(this.boardW, this.boardH, s.cols, s.rows, true);
+    const l = computeLayout(this.boardW, this.boardH, s.cols, s.rows, true, MP_EXTRA_ROWS);
     const x = Math.floor((col - l.left) / 2);
     const y = row - l.top;
     if (x < 0 || y < 0 || x >= this.boardW || y >= this.boardH) return null;

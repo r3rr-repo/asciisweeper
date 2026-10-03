@@ -17,6 +17,8 @@
  * shader tints it. That keeps one atlas usable for all 16 palette colours.
  */
 
+import { fitFontSize } from "./sizing";
+
 export const ATLAS_COLS = 16;
 export const ATLAS_ROWS_PER_WEIGHT = 6;
 export const ATLAS_ROWS = ATLAS_ROWS_PER_WEIGHT * 2;
@@ -62,9 +64,22 @@ export function buildAtlas(spec: AtlasSpec): Atlas {
   ctx.textBaseline = "middle";
   ctx.fillStyle = "#ffffff";
 
-  const px = Math.max(1, Math.round(cellH * fontScale));
+  // Probe size for measuring the advance. Large enough that rounding in
+  // measureText does not matter.
+  const PROBE = 100;
+
   for (let weight = 0; weight < 2; weight++) {
-    ctx.font = `${weight ? "bold " : ""}${px}px ${fontFamily}`;
+    const bold = weight ? "bold " : "";
+    // Measure the ADVANCE rather than assuming the glyph fits. fontFamily is a
+    // stack, so whichever family the system resolves decides the advance; a
+    // glyph wider than the cell bleeds into the neighbouring tile and shows up
+    // on screen as ghosting, not as an obvious failure. Measured per weight
+    // because a bold face can be wider.
+    ctx.font = `${bold}${PROBE}px ${fontFamily}`;
+    const advanceRatio = ctx.measureText("M").width / PROBE;
+    const px = fitFontSize(cellW, cellH, advanceRatio, fontScale);
+    ctx.font = `${bold}${px}px ${fontFamily}`;
+
     for (let code = FIRST_GLYPH; code <= LAST_GLYPH; code++) {
       const tile = code - FIRST_GLYPH;
       const tx = tile % ATLAS_COLS;
@@ -73,23 +88,15 @@ export function buildAtlas(spec: AtlasSpec): Atlas {
       // landing on half-pixel boundaries, which is what makes NEAREST look sharp.
       const cx = Math.round(tx * cellW + cellW / 2);
       const cy = Math.round(ty * cellH + cellH / 2);
+      // Belt and braces over the measurement: clip to the tile so even a
+      // pathological fallback font cannot touch its neighbour.
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(tx * cellW, ty * cellH, cellW, cellH);
+      ctx.clip();
       ctx.fillText(String.fromCharCode(code), cx, cy);
+      ctx.restore();
     }
   }
   return { canvas, spec };
-}
-
-/**
- * Measures the natural width:height of a monospace cell for a font, used only as
- * a starting suggestion. The actual cell size is a configured constant: deriving
- * it from font metrics is how the board's proportions drift away from the
- * terminal's, because the board's "glyph + trailing space" trick relies on the
- * cell being roughly 1:2.
- */
-export function suggestAspect(fontFamily: string): number {
-  const c = makeCanvas(8, 8);
-  const ctx = c.getContext("2d") as CanvasRenderingContext2D;
-  ctx.font = `100px ${fontFamily}`;
-  const w = ctx.measureText("M").width;
-  return w > 0 ? w / 100 : 0.5;
 }

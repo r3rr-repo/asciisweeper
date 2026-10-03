@@ -20,11 +20,24 @@ export interface Layout {
   sidePanelsFit: boolean;
 }
 
+/**
+ * @param extraRowsBelow rows the caller draws BELOW the block, which must be
+ *   kept on screen when the block is centred. Multiplayer passes 6: it puts a
+ *   status line at top+h+5, three chat lines at +6..+8 and the composer at +9,
+ *   all outside main.c's h+8 block.
+ *
+ *   This is a deliberate divergence from the C. game_init always uses h+8, and
+ *   the terminal client has the same latent clipping on a short terminal - but
+ *   it inherits whatever size the terminal happens to be, whereas the browser
+ *   chooses its own grid and so should reserve the space rather than hope.
+ *   Single-player passes 0 and keeps the ported arithmetic exactly.
+ */
 export function computeLayout(
   w: number, h: number, cols: number, rows: number, wantSidePanels: boolean,
+  extraRowsBelow = 0,
 ): Layout {
   // src/main.c:93 - title, blank, hud, border*2, board rows, blank, footer*2
-  const blockH = h + 8;
+  const blockH = h + 8 + extraRowsBelow;
   const boardBlockW = w * 2 + 2;
   const panelExtra = 2 * (AVATAR_WIDTH_CHARS + AVATAR_GUTTER);
   const sidePanelsFit = wantSidePanels && cols >= boardBlockW + panelExtra;

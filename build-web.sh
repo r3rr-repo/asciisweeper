@@ -187,6 +187,9 @@ if [ "$TEST" = 1 ]; then
   echo "==> seo tests"
   (cd web && ./node_modules/.bin/esbuild test/seo.test.ts --bundle --platform=node --format=esm --outfile="$TMP/seo.mjs" --log-level=warning)
   node "$TMP/seo.mjs" "$ROOT/web"
+  echo "==> sizing tests"
+  (cd web && ./node_modules/.bin/esbuild test/sizing.test.ts --bundle --platform=node --format=esm --outfile="$TMP/sizing.mjs" --log-level=warning)
+  node "$TMP/sizing.mjs"
   echo "==> shader math tests"
   (cd web && ./node_modules/.bin/esbuild test/shader.test.ts --bundle --platform=node --format=esm --outfile="$TMP/shader.mjs" --log-level=warning)
   node "$TMP/shader.mjs"

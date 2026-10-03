@@ -20,13 +20,22 @@ const KEY = "asciisweeper.config.v1";
 declare const __WS_URL__: string | null;
 const BUILD_WS_URL: string | null = typeof __WS_URL__ === "string" ? __WS_URL__ : null;
 
+import { DEFAULT_TARGET_ROWS, clampTargetRows } from "./term/sizing";
+
 export interface Config {
   v: 1;
   avatar: { skin: number; hair: number };
   wsUrl: string | null;
   name: string;
-  /** Explicit, NOT derived from font metrics - see the plan's risk list. */
+  /**
+   * The cell ASPECT, as a width:height pair. Only the ratio is used now - the
+   * actual pixel size comes from targetRows via chooseGrid. Kept explicit
+   * rather than derived from font metrics, because the board's "glyph plus a
+   * trailing space" trick relies on a roughly 1:2 cell to look square.
+   */
   baseCell: { w: number; h: number };
+  /** Rows the grid aims for. The +/- zoom adjusts this; smaller = bigger cells. */
+  targetRows: number;
   brightenBlack: boolean;
   fontFamily: string;
 }
@@ -40,6 +49,7 @@ function defaults(randomAvatar: () => { skin: number; hair: number }): Config {
     wsUrl: BUILD_WS_URL,
     name: "Player",
     baseCell: { w: 10, h: 20 },
+    targetRows: DEFAULT_TARGET_ROWS,
     brightenBlack: true,
     fontFamily: DEFAULT_FONT,
   };
@@ -75,6 +85,8 @@ export function loadConfig(randomAvatar: () => { skin: number; hair: number }): 
         w: typeof p.baseCell?.w === "number" && p.baseCell.w > 0 ? p.baseCell.w : d.baseCell.w,
         h: typeof p.baseCell?.h === "number" && p.baseCell.h > 0 ? p.baseCell.h : d.baseCell.h,
       },
+      targetRows: clampTargetRows(
+        typeof p.targetRows === "number" ? p.targetRows : d.targetRows),
       brightenBlack: typeof p.brightenBlack === "boolean" ? p.brightenBlack : d.brightenBlack,
       fontFamily: typeof p.fontFamily === "string" && p.fontFamily !== "" ? p.fontFamily : d.fontFamily,
     };

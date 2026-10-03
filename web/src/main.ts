@@ -27,12 +27,9 @@ import { SinglePlayer } from "./game/single";
 import { Multiplayer } from "./game/multi";
 import { loadConfig, resolveWsUrl, saveConfig, validateWsUrl, type Config } from "./config";
 
-/** src/main.c:1143-1149 - the C exits outright below this; we draw a message. */
-const MIN_COLS = 40;
-const MIN_ROWS = 20;
-/** Keeps a huge monitor from producing an absurdly wide terminal. */
-const MAX_COLS = 120;
-const MAX_ROWS = 40;
+import {
+  MIN_COLS, MIN_ROWS, chooseGrid, clampTargetRows, DEFAULT_TARGET_ROWS,
+} from "./term/sizing";
 
 const VERSION = "asciisweeper-web 0.4";
 
@@ -109,18 +106,10 @@ class App {
     }
 
     const base = this.config.baseCell;
-    // Whole-number scale only, chosen so the smallest supported grid still fits.
-    const scale = Math.max(1, Math.floor(Math.min(
-      backW / (MIN_COLS * base.w * this.dpr),
-      backH / (MIN_ROWS * base.h * this.dpr),
-    )));
-    const cellWdev = Math.max(1, Math.round(base.w * scale * this.dpr));
-    const cellHdev = Math.max(1, Math.round(base.h * scale * this.dpr));
-
-    let cols = Math.floor(backW / cellWdev);
-    let rows = Math.floor(backH / cellHdev);
-    cols = Math.min(Math.max(cols, 1), MAX_COLS);
-    rows = Math.min(Math.max(rows, 1), MAX_ROWS);
+    const grid = chooseGrid(backW, backH, this.config.targetRows, {
+      aspect: base.w / base.h,
+    });
+    const { cellW: cellWdev, cellH: cellHdev, cols, rows } = grid;
 
     if (cols < MIN_COLS || rows < MIN_ROWS) {
       if (this.mode.kind !== "fatal") this.tooSmall(cols, rows, cellWdev, cellHdev);
@@ -334,8 +323,46 @@ class App {
     this.mode = { kind: "quit" };
   }
 
+  /**
+   * +/-/0 adjust the grid density. `+` makes things bigger, which means FEWER
+   * rows, so the sign is inverted relative to targetRows.
+   *
+   * Returns true if the key was consumed. Must be checked BEFORE mode dispatch,
+   * but skipped whenever a text field is open - in the custom-board prompt, the
+   * multiplayer setup prompt and the chat composer these are literal characters
+   * someone may want to type.
+   */
+  private handleZoom(k: Key): boolean {
+    if (k.name !== "char") return false;
+    if (this.textEntryOpen()) return false;
+
+    let next: number;
+    switch (k.ch) {
+      case "+": case "=": next = this.config.targetRows - 2; break;
+      case "-": case "_": next = this.config.targetRows + 2; break;
+      case "0": next = DEFAULT_TARGET_ROWS; break;
+      default: return false;
+    }
+    next = clampTargetRows(next);
+    if (next !== this.config.targetRows) {
+      this.config.targetRows = next;
+      saveConfig(this.config);
+      this.resize(); // re-rasterises the atlas at the new exact cell size
+    }
+    return true;
+  }
+
+  private textEntryOpen(): boolean {
+    switch (this.mode.kind) {
+      case "custom": case "mpSetup": return true;
+      case "multi": return this.mode.game.textEntryActive;
+      default: return false;
+    }
+  }
+
   private onKey(k: Key): void {
     const now = performance.now();
+    if (this.handleZoom(k)) return;
     switch (this.mode.kind) {
       case "menu": {
         const m = this.mode;

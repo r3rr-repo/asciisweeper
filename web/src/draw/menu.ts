@@ -68,7 +68,9 @@ export function drawMenu(s: Surface, sel: number, version: string): void {
     });
   }
 
-  const help = "Move: arrows/jk   Select: enter   Quit: q";
+  // Web-only help text, so the zoom hint belongs here rather than in the game
+  // footers, which are line-for-line ports of draw_footer / draw_mp_footer.
+  const help = "Move: arrows/jk   Select: enter   Zoom: +/-   Quit: q";
   s.withAttrs(CP_HUD, false, () => {
     s.print(g.itemRow(MENU_ITEMS.length) + 1, s.centreCol(0, s.cols, help), help);
     s.print(s.rows - 1, 1, version);
