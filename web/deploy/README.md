@@ -33,12 +33,16 @@ sysrc asciisweeper_bridge_servername="yourdomain.com"
 service asciisweeper_bridge start
 ```
 
-All settings are `rc.conf` variables, so the script itself never needs editing:
+All settings are `rc.conf` variables, so the script itself never needs editing.
+Note the user variable is `_runas`, not `_user`: `${name}_user` is reserved by
+`rc.subr`, which would run `daemon(8)` itself as that user, leaving it unable to
+drop privileges and failing with
+`initgroups(www,80): Operation not permitted`.
 
 | Variable | Default |
 |---|---|
 | `asciisweeper_bridge_enable` | `NO` |
-| `asciisweeper_bridge_user` | `www` |
+| `asciisweeper_bridge_runas` | `www` |
 | `asciisweeper_bridge_node` | `/usr/local/bin/node` |
 | `asciisweeper_bridge_dir` | `/usr/local/share/asciisweeper/web/bridge` |
 | `asciisweeper_bridge_bind` | `127.0.0.1` |
@@ -48,7 +52,7 @@ All settings are `rc.conf` variables, so the script itself never needs editing:
 | `asciisweeper_bridge_ca` | *(empty)* |
 | `asciisweeper_bridge_logfile` | `/var/log/asciisweeper-bridge.log` |
 
-`daemon(8)` handles backgrounding, the pidfile, dropping to `_user` and restarting
+`daemon(8)` handles backgrounding, the pidfile, dropping to `_runas` and restarting
 the bridge if it exits. Start it by hand once: the script checks that `node` and
 `bridge.mjs` are where it expects, and warns if `ws` has not been installed with
 `npm ci --omit=dev`.

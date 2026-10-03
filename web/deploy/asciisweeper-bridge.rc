@@ -33,7 +33,10 @@ desc="asciisweeper multiplayer WebSocket bridge"
 load_rc_config "$name"
 
 : ${asciisweeper_bridge_enable:="NO"}
-: ${asciisweeper_bridge_user:="www"}
+# NOT asciisweeper_bridge_user: ${name}_user is reserved by rc.subr, which uses
+# it to run $command itself as that user. daemon(8) would then no longer be root
+# and its own -u would fail with "initgroups(www,80): Operation not permitted".
+: ${asciisweeper_bridge_runas:="www"}
 : ${asciisweeper_bridge_node:="/usr/local/bin/node"}
 : ${asciisweeper_bridge_dir:="/usr/local/share/asciisweeper/web/bridge"}
 : ${asciisweeper_bridge_bind:="127.0.0.1"}
@@ -43,11 +46,11 @@ load_rc_config "$name"
 : ${asciisweeper_bridge_ca:=""}
 : ${asciisweeper_bridge_logfile:="/var/log/asciisweeper-bridge.log"}
 
+# The SUPERVISOR's pid, deliberately. daemon(8) is started with -r, so killing
+# the child just makes it respawn and "service stop" would never stop anything.
+# Signalling the supervisor makes it terminate the child and exit. procname is
+# therefore left to default to $command.
 pidfile="/var/run/${name}.pid"
-
-# rc.subr matches the running process by procname, which for a Node service is
-# the interpreter rather than the script.
-procname="${asciisweeper_bridge_node}"
 command="/usr/sbin/daemon"
 
 start_precmd="asciisweeper_bridge_precmd"
@@ -66,8 +69,12 @@ asciisweeper_bridge_precmd()
 		warn "ws not found under ${asciisweeper_bridge_dir}/../node_modules - run 'npm ci --omit=dev' in the web directory"
 	fi
 
-	install -o "${asciisweeper_bridge_user}" -g "${asciisweeper_bridge_user}" \
-		-m 640 /dev/null "${asciisweeper_bridge_logfile}" 2>/dev/null || true
+	# Create it only when missing: installing /dev/null over it would truncate
+	# the log on every restart.
+	if [ ! -e "${asciisweeper_bridge_logfile}" ]; then
+		install -o "${asciisweeper_bridge_runas}" -g "${asciisweeper_bridge_runas}" \
+			-m 640 /dev/null "${asciisweeper_bridge_logfile}" 2>/dev/null || true
+	fi
 
 	_bridge_args="--bind ${asciisweeper_bridge_bind}"
 	_bridge_args="${_bridge_args} --listen ${asciisweeper_bridge_listen}"
@@ -81,7 +88,7 @@ asciisweeper_bridge_precmd()
 	# that systemd would otherwise handle.
 	#   -f  redirect stdio away from the terminal
 	#   -r  restart if it exits
-	#   -P  supervisor pidfile, -p child pidfile
+	#   -P  supervisor pidfile (what rc stops), -p child pidfile
 	#   -u  run as an unprivileged user
 	#   -o  append output to a log file
 	# A local name, NOT rc_flags - that one belongs to rc.subr, which passes it
@@ -90,8 +97,8 @@ asciisweeper_bridge_precmd()
 	# daemon's -t title must be a single word: command_args is word-split when
 	# rc.subr invokes $command, so a title containing spaces would spill over and
 	# be taken as the command to run.
-	_daemon_args="-f -r -t ${name} -P /var/run/${name}.supervisor.pid -p ${pidfile}"
-	_daemon_args="${_daemon_args} -u ${asciisweeper_bridge_user} -o ${asciisweeper_bridge_logfile}"
+	_daemon_args="-f -r -t ${name} -P ${pidfile} -p /var/run/${name}.child.pid"
+	_daemon_args="${_daemon_args} -u ${asciisweeper_bridge_runas} -o ${asciisweeper_bridge_logfile}"
 	command_args="${_daemon_args} ${asciisweeper_bridge_node} ${asciisweeper_bridge_dir}/bridge.mjs ${_bridge_args}"
 }
 
