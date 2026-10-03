@@ -9,7 +9,7 @@ Keeping the steps in one place stops the two from drifting.
 
 | File | Purpose |
 |---|---|
-| `asciisweeper-bridge.service` | systemd unit. Edit `User`, `WorkingDirectory` and the upstream flags. |
+| `asciisweeper-bridge.service` | systemd unit. Runs as `asciisweeper`; edit `WorkingDirectory` and the upstream flags. |
 | `asciisweeper-bridge.rc` | FreeBSD `rc.d` script. Configured through `rc.conf`, not by editing it. |
 | `Caddyfile.example` | Caddy: static files plus the `/ws` route. |
 | `nginx.conf.example` | nginx equivalent, including the `.wasm` media type and the read timeout. |
@@ -27,6 +27,7 @@ node web/bridge/bridge.mjs --bind 127.0.0.1 --listen 8080 \
 
 ```sh
 pkg install node npm
+pw useradd asciisweeper -d /nonexistent -s /usr/sbin/nologin -c 'asciisweeper bridge'
 install -m 555 asciisweeper-bridge.rc /usr/local/etc/rc.d/asciisweeper_bridge
 sysrc asciisweeper_bridge_enable="YES"
 sysrc asciisweeper_bridge_servername="yourdomain.com"
@@ -34,15 +35,24 @@ service asciisweeper_bridge start
 ```
 
 All settings are `rc.conf` variables, so the script itself never needs editing.
-Note the user variable is `_runas`, not `_user`: `${name}_user` is reserved by
-`rc.subr`, which would run `daemon(8)` itself as that user, leaving it unable to
-drop privileges and failing with
-`initgroups(www,80): Operation not permitted`.
+
+Two things about the user it runs as. It defaults to a dedicated
+`asciisweeper` account, matching the systemd unit — not `www`, which belongs to
+the web server and has no reason to also own a WebSocket proxy. And the variable
+is `_runas`, **not** `_user`: `${name}_user` is reserved by `rc.subr`, which
+would run `daemon(8)` itself as that user, leaving it unable to drop privileges
+and failing with `initgroups(www,80): Operation not permitted`.
+
+To use an account you already have, `sysrc asciisweeper_bridge_runas="www"`. The
+script checks the account exists before starting, and re-owns the logfile to it,
+so switching is just the one `sysrc`. If you set `_ca`, make sure that file is
+readable by whichever account you pick — the bridge reads it after dropping
+privileges.
 
 | Variable | Default |
 |---|---|
 | `asciisweeper_bridge_enable` | `NO` |
-| `asciisweeper_bridge_runas` | `www` |
+| `asciisweeper_bridge_runas` | `asciisweeper` |
 | `asciisweeper_bridge_node` | `/usr/local/bin/node` |
 | `asciisweeper_bridge_dir` | `/usr/local/share/asciisweeper/web/bridge` |
 | `asciisweeper_bridge_bind` | `127.0.0.1` |

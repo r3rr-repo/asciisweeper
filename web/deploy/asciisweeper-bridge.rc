@@ -33,10 +33,14 @@ desc="asciisweeper multiplayer WebSocket bridge"
 load_rc_config "$name"
 
 : ${asciisweeper_bridge_enable:="NO"}
+# A dedicated account rather than www: the bridge has no business sharing the
+# web server's user, and the systemd unit already uses this name. Point it at an
+# existing account with sysrc if you prefer.
+#
 # NOT asciisweeper_bridge_user: ${name}_user is reserved by rc.subr, which uses
 # it to run $command itself as that user. daemon(8) would then no longer be root
 # and its own -u would fail with "initgroups(www,80): Operation not permitted".
-: ${asciisweeper_bridge_runas:="www"}
+: ${asciisweeper_bridge_runas:="asciisweeper"}
 : ${asciisweeper_bridge_node:="/usr/local/bin/node"}
 : ${asciisweeper_bridge_dir:="/usr/local/share/asciisweeper/web/bridge"}
 : ${asciisweeper_bridge_bind:="127.0.0.1"}
@@ -60,6 +64,11 @@ asciisweeper_bridge_precmd()
 	if [ ! -x "${asciisweeper_bridge_node}" ]; then
 		err 1 "node not found at ${asciisweeper_bridge_node} (pkg install node; or set asciisweeper_bridge_node)"
 	fi
+	if ! id -u "${asciisweeper_bridge_runas}" >/dev/null 2>&1; then
+		err 1 "user '${asciisweeper_bridge_runas}' does not exist - create it with:
+  pw useradd ${asciisweeper_bridge_runas} -d /nonexistent -s /usr/sbin/nologin -c 'asciisweeper bridge'
+or point asciisweeper_bridge_runas at an existing account"
+	fi
 	if [ ! -f "${asciisweeper_bridge_dir}/bridge.mjs" ]; then
 		err 1 "bridge.mjs not found in ${asciisweeper_bridge_dir} (set asciisweeper_bridge_dir)"
 	fi
@@ -69,11 +78,19 @@ asciisweeper_bridge_precmd()
 		warn "ws not found under ${asciisweeper_bridge_dir}/../node_modules - run 'npm ci --omit=dev' in the web directory"
 	fi
 
-	# Create it only when missing: installing /dev/null over it would truncate
-	# the log on every restart.
+	# Ask for the account's actual primary group rather than assuming it shares
+	# the user's name: true for an account made by pw useradd, not for www.
+	_bridge_group=$(id -gn "${asciisweeper_bridge_runas}" 2>/dev/null) || _bridge_group=""
+	: ${_bridge_group:="${asciisweeper_bridge_runas}"}
+	# Create only when missing - installing /dev/null over it would truncate the
+	# log on every restart - but always re-own it, so changing the runas user
+	# does not leave behind a log the new user cannot write.
 	if [ ! -e "${asciisweeper_bridge_logfile}" ]; then
-		install -o "${asciisweeper_bridge_runas}" -g "${asciisweeper_bridge_runas}" \
+		install -o "${asciisweeper_bridge_runas}" -g "${_bridge_group}" \
 			-m 640 /dev/null "${asciisweeper_bridge_logfile}" 2>/dev/null || true
+	else
+		chown "${asciisweeper_bridge_runas}:${_bridge_group}" \
+			"${asciisweeper_bridge_logfile}" 2>/dev/null || true
 	fi
 
 	_bridge_args="--bind ${asciisweeper_bridge_bind}"

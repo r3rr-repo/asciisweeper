@@ -419,8 +419,10 @@ locally, so nothing new is exposed to the internet.
 **Linux, systemd:**
 
 ```sh
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin asciisweeper
+
 sudo cp web/deploy/asciisweeper-bridge.service /etc/systemd/system/
-sudoedit /etc/systemd/system/asciisweeper-bridge.service   # User, paths, step-5 flags
+sudoedit /etc/systemd/system/asciisweeper-bridge.service   # paths, step-5 flags
 sudo systemctl daemon-reload
 sudo systemctl enable --now asciisweeper-bridge
 systemctl status asciisweeper-bridge
@@ -432,6 +434,9 @@ systemctl status asciisweeper-bridge
 sudo install -m 555 web/deploy/asciisweeper-bridge.rc \
   /usr/local/etc/rc.d/asciisweeper_bridge
 
+sudo pw useradd asciisweeper -d /nonexistent -s /usr/sbin/nologin \
+  -c 'asciisweeper bridge'
+
 sudo sysrc asciisweeper_bridge_enable="YES"
 sudo sysrc asciisweeper_bridge_servername="yourdomain.com"   # from step 5
 
@@ -440,8 +445,9 @@ sudo service asciisweeper_bridge status
 ```
 
 Everything is configurable through `rc.conf` rather than by editing the script —
-`sysrc asciisweeper_bridge_ca=...`, `_upstream`, `_listen`, `_bind`, `_user`,
-`_dir`, `_node`, `_logfile`. Run `service asciisweeper_bridge start` once by hand
+`sysrc asciisweeper_bridge_ca=...`, `_upstream`, `_listen`, `_bind`, `_runas`,
+`_dir`, `_node`, `_logfile`. (`_runas`, not `_user` — that suffix is reserved by
+`rc.subr`.) Run `service asciisweeper_bridge start` once by hand
 before relying on it: the script checks that `node` and `bridge.mjs` are where it
 expects and fails with a clear message if not. Output goes to
 `/var/log/asciisweeper-bridge.log`, and `daemon(8)` restarts the bridge if it
