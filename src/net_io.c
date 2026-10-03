@@ -192,6 +192,8 @@ size_t pack_hello(uint8_t *buf, const MsgHello *m)
     put_cstr_fixed(&w, m->name, NET_MAX_NAME_LEN);
     put_u8(&w, m->avatar_skin);
     put_u8(&w, m->avatar_hair);
+    put_bytes(&w, m->player_uuid, NET_UUID_LEN);
+    put_bytes(&w, m->player_secret, NET_SECRET_LEN);
     return w.pos;
 }
 bool unpack_hello(const uint8_t *buf, size_t len, MsgHello *out)
@@ -201,6 +203,8 @@ bool unpack_hello(const uint8_t *buf, size_t len, MsgHello *out)
     if (!get_cstr_fixed(&r, out->name, NET_MAX_NAME_LEN)) return false;
     if (!get_u8(&r, &out->avatar_skin)) return false;
     if (!get_u8(&r, &out->avatar_hair)) return false;
+    if (!get_bytes(&r, out->player_uuid, NET_UUID_LEN)) return false;
+    if (!get_bytes(&r, out->player_secret, NET_SECRET_LEN)) return false;
     return true;
 }
 

@@ -35,7 +35,15 @@ interface Raw {
   core_cells_ptr(): number; core_tx_ptr(): number;
   core_in_ptr(): number; core_in_size(): number;
   core_avatar_random(out: number): void;
-  core_pack_hello(name: number, skin: number, hair: number): number;
+  core_pack_hello(name: number, skin: number, hair: number, uuid: number, secret: number): number;
+  core_uuid_v7(unixMs: number, rnd10: number, out16: number): void;
+  core_uuid_is_v7(u: number): number;
+  core_uuid_format(u: number, out: number): void;
+  core_uuid_parse(s: number, out: number): number;
+  core_hex_encode(inp: number, len: number, out: number): void;
+  core_hex_decode(s: number, out: number, len: number): number;
+  core_uuid_len(): number;
+  core_secret_len(): number;
   core_pack_reconnect(token: number): number;
   core_pack_action_reveal(x: number, y: number): number;
   core_pack_action_flag(x: number, y: number, flagged: number): number;
@@ -124,6 +132,7 @@ export class Core {
     protoVersion: 0, maxW: 0, maxH: 0,
     mpW: 0, mpH: 0, mpMines: 0,
     maxNameLen: 0, maxChatLen: 0, tokenLen: 0, maxPayload: 0,
+    uuidLen: 0, secretLen: 0,
   };
 
   initConsts(): void {
@@ -138,6 +147,8 @@ export class Core {
     c.maxChatLen = this.x.core_max_chat_len();
     c.tokenLen = this.x.core_token_len();
     c.maxPayload = this.x.core_max_payload();
+    c.uuidLen = this.x.core_uuid_len();
+    c.secretLen = this.x.core_secret_len();
   }
 
   srand(seed: number): void { this.x.core_srand(seed >>> 0); }
@@ -182,8 +193,76 @@ export class Core {
     const p = this.x.core_tx_ptr();
     return this.mem.slice(p, p + len);
   }
-  packHello(name: string, skin: number, hair: number): Uint8Array {
-    return this.tx(this.x.core_pack_hello(this.writeIn(name), skin, hair));
+  packHello(name: string, skin: number, hair: number,
+            uuid: Uint8Array, secret: Uint8Array): Uint8Array {
+    // Three separate buffers, so writing one cannot clobber another: the name
+    // goes in the inbound scratch and the identity just past it.
+    const namePtr = this.writeIn(name);
+    const uuidPtr = this.x.core_in_ptr() + 160;
+    const secretPtr = uuidPtr + this.consts.uuidLen;
+    const m = this.mem;
+    m.set(uuid.subarray(0, this.consts.uuidLen), uuidPtr);
+    m.set(secret.subarray(0, this.consts.secretLen), secretPtr);
+    return this.tx(this.x.core_pack_hello(namePtr, skin, hair, uuidPtr, secretPtr));
+  }
+
+  // ---- player identity, through the same uuid.c the terminal client uses ----
+
+  /** A fresh UUIDv7 stamped with the current time. */
+  newUuid(): Uint8Array {
+    const rnd = new Uint8Array(10);
+    crypto.getRandomValues(rnd);
+    const rndPtr = this.x.core_in_ptr();
+    const outPtr = rndPtr + 32;
+    this.mem.set(rnd, rndPtr);
+    this.x.core_uuid_v7(Date.now(), rndPtr, outPtr);
+    return this.mem.slice(outPtr, outPtr + this.consts.uuidLen);
+  }
+
+  /** 32 random bytes. Treated as a password: never shown without asking. */
+  newSecret(): Uint8Array {
+    const s = new Uint8Array(this.consts.secretLen);
+    crypto.getRandomValues(s);
+    return s;
+  }
+
+  isUuidV7(u: Uint8Array): boolean {
+    if (u.length !== this.consts.uuidLen) return false;
+    const p = this.x.core_in_ptr();
+    this.mem.set(u, p);
+    return this.x.core_uuid_is_v7(p) !== 0;
+  }
+
+  formatUuid(u: Uint8Array): string {
+    const p = this.x.core_in_ptr();
+    const out = p + 32;
+    this.mem.set(u, p);
+    this.x.core_uuid_format(p, out);
+    return this.readCStr(out, 37);
+  }
+
+  /** Returns null when the text is not a canonical UUID. */
+  parseUuid(text: string): Uint8Array | null {
+    const p = this.writeIn(text);
+    const out = this.x.core_in_ptr() + 160;
+    if (this.x.core_uuid_parse(p, out) === 0) return null;
+    return this.mem.slice(out, out + this.consts.uuidLen);
+  }
+
+  hexEncode(bytes: Uint8Array): string {
+    const p = this.x.core_in_ptr();
+    const out = p + 64;
+    this.mem.set(bytes, p);
+    this.x.core_hex_encode(p, bytes.length, out);
+    return this.readCStr(out, bytes.length * 2 + 1);
+  }
+
+  /** Returns null when the text is not exactly `len` bytes of hex. */
+  hexDecode(text: string, len: number): Uint8Array | null {
+    const p = this.writeIn(text);
+    const out = this.x.core_in_ptr() + 160;
+    if (this.x.core_hex_decode(p, out, len) === 0) return null;
+    return this.mem.slice(out, out + len);
   }
   packReconnect(token: Uint8Array): Uint8Array {
     const p = this.x.core_in_ptr();

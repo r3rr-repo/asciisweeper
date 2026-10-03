@@ -32,7 +32,7 @@ HASH_OUT=web/wasm/core.hash
 # artifact is stale and must be rebuilt, or the browser would play by different
 # rules than the C.
 WASM_SRC="src/board.c src/board.h src/net_io.c src/net_io.h src/net_proto.h \
-          web/core/core_api.c web/core/shim/openssl/ssl.h"
+          src/uuid.c src/uuid.h web/core/core_api.c web/core/shim/openssl/ssl.h"
 
 FORCE_WASM=0; SERVE=0; TEST=0; ALLOW_STALE=0; E2E=0; CARD=0
 for arg in "$@"; do
@@ -115,7 +115,7 @@ build_wasm() {
   set -- --target=wasm32-wasip1 "--sysroot=$TC_SYSROOT" -O2 -flto \
          -Wall -Wextra -Wno-unused-parameter \
          -I src -I web/core/shim \
-         src/board.c src/net_io.c web/core/core_api.c \
+         src/board.c src/net_io.c src/uuid.c web/core/core_api.c \
          -nostartfiles -Wl,--no-entry -Wl,--lto-O2 -Wl,--strip-all \
          -Wl,--initial-memory=1048576 \
          -o "$WASM_OUT"

@@ -5,10 +5,12 @@
 #include <stddef.h>
 #include "board.h"
 
-#define NET_PROTO_VERSION   5
+#define NET_PROTO_VERSION   6
 #define NET_MAX_PAYLOAD     8192
 #define NET_MAX_NAME_LEN    16
 #define NET_TOKEN_LEN       16
+#define NET_UUID_LEN        16   /* a UUIDv7, raw bytes */
+#define NET_SECRET_LEN      32   /* proves the UUID belongs to this player */
 #define NET_ERR_MSG_LEN     64
 #define NET_CHAT_MSG_LEN    120
 
@@ -62,6 +64,9 @@ typedef enum {
     ERR_QUEUE_FULL       = 6,
     ERR_RATE_LIMITED     = 7,
     ERR_MALFORMED        = 8,
+    /* The UUID is already bound to a different secret: someone else's identity,
+     * or this client's config was restored without its secret. */
+    ERR_IDENTITY_MISMATCH = 9,
 } ErrorCode;
 
 /* --- client -> server payloads --- */
@@ -71,6 +76,11 @@ typedef struct {
     char name[NET_MAX_NAME_LEN + 1];
     uint8_t avatar_skin;
     uint8_t avatar_hair;
+    /* Stable identity, so a score history survives renames. The UUID is public
+     * and the secret proves it is yours; the server binds the pair the first
+     * time it sees the UUID. The name is display only and may collide freely. */
+    uint8_t player_uuid[NET_UUID_LEN];
+    uint8_t player_secret[NET_SECRET_LEN];
 } MsgHello;
 
 typedef struct {

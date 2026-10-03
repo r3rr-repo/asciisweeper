@@ -40,7 +40,7 @@ const snapshot = () => {
 const at = (cells, x, y) => cells[y * C.core_w() + x];
 
 // ------------------------------------------------------------------- constants
-eq(C.core_proto_version(), 5, "protocol version matches net_proto.h");
+eq(C.core_proto_version(), 6, "protocol version matches net_proto.h");
 eq(C.core_max_w(), 60, "MAX_W");
 eq(C.core_max_h(), 30, "MAX_H");
 eq(C.core_mp_w(), 16, "MP board width");
@@ -201,10 +201,17 @@ const scratch = C.core_in_ptr();          // dedicated inbound buffer, never ali
 ok(C.core_in_size() >= 128, "inbound scratch is big enough for a chat line");
 
 writeStr(scratch, "Rob");
-let n = C.core_pack_hello(scratch, 3, 5);
+{
+  // HELLO now carries the identity, so give it one.
+  const up = scratch + 160, sp = up + 16;
+  const m = mem();
+  for (let i = 0; i < 16; i++) m[up + i] = i + 1;
+  for (let i = 0; i < 32; i++) m[sp + i] = 0xa0 + i;
+  var n = C.core_pack_hello(scratch, 3, 5, up, sp);
+}
 ok(n > 0, "pack_hello produced a payload");
 const helloBytes = mem().slice(C.core_tx_ptr(), C.core_tx_ptr() + n);
-eq(helloBytes[0], 5, "hello carries the protocol version");
+eq(helloBytes[0], 6, "hello carries the protocol version");
 
 // MSG_CHAT_RECV round-trip through core_rx
 writeStr(scratch, "hello there");
@@ -227,6 +234,41 @@ for (let i = 0; i < 500; i++) {
   if (skin < 1 || skin > 7 || hair < 1 || hair > 7) outOfRange++;
 }
 eq(outOfRange, 0, "avatar colours stay in 1-7, never 0 (COLOR_BLACK is for eyes)");
+
+// ------------------------------------------------- UUIDv7, shared with the C
+// The browser must not have its own RFC 9562 implementation. Feeding the wasm
+// the spec's worked example proves it is running the same uuid.c the terminal
+// client and the server link against.
+{
+  eq(C.core_uuid_len(), 16, "a UUID is 16 bytes");
+  eq(C.core_secret_len(), 32, "a secret is 32 bytes");
+
+  const rndPtr = C.core_in_ptr(), outPtr = rndPtr + 32, strPtr = outPtr + 32;
+  // RFC 9562 A.6: ts 0x017F22E279B0, rand_a 0xCC3, rand_b 0x18C4DC0C0C07398F
+  mem().set(new Uint8Array([0x0c, 0xc3, 0x18, 0xc4, 0xdc, 0x0c, 0x0c, 0x07, 0x39, 0x8f]), rndPtr);
+  C.core_uuid_v7(0x017f22e279b0, rndPtr, outPtr);
+  C.core_uuid_format(outPtr, strPtr);
+  eq(cstr(strPtr), "017f22e2-79b0-7cc3-98c4-dc0c0c07398f",
+     "the wasm reproduces RFC 9562's worked example, so it is the same uuid.c");
+  eq(C.core_uuid_is_v7(outPtr), 1, "and recognises it as v7");
+
+  // A v4 UUID must be refused, since the server only accepts v7.
+  const v4 = strPtr + 64;
+  const put = (p, t) => { mem().set(new TextEncoder().encode(t + "\0"), p); return p; };
+  eq(C.core_uuid_parse(put(v4, "9b2b1a3e-1f4d-4c7a-8f21-2b7c9d0e5a63"), outPtr), 1,
+     "a v4 UUID parses");
+  eq(C.core_uuid_is_v7(outPtr), 0, "...but is not v7");
+
+  eq(C.core_uuid_parse(put(v4, "nonsense"), outPtr), 0, "garbage does not parse");
+
+  // Hex round-trip for the secret.
+  const hexIn = strPtr + 128, hexOut = hexIn + 64;
+  mem().set(new Uint8Array([0xde, 0xad, 0xbe, 0xef]), hexIn);
+  C.core_hex_encode(hexIn, 4, hexOut);
+  eq(cstr(hexOut), "deadbeef", "hex_encode matches the C");
+  eq(C.core_hex_decode(hexOut, hexIn + 32, 4), 1, "and decodes back");
+  eq(mem()[hexIn + 32], 0xde, "...to the same bytes");
+}
 
 // ---------------------------------------------------------------------- results
 console.log(`\n${pass} passed, ${fail} failed`);

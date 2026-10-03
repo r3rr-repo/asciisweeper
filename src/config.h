@@ -2,6 +2,7 @@
 #define ASCIISWEEPER_CONFIG_H
 
 #include "avatar.h"
+#include "uuid.h"
 #include "net_proto.h"
 
 #define CONFIG_HOST_LEN 128
@@ -9,6 +10,11 @@
 
 typedef struct {
     Avatar avatar;
+    /* Stable identity. The UUID is public; the secret proves it is ours and
+     * must be treated like a password. Generated on first run and then never
+     * changed unless the player explicitly regenerates or imports. */
+    uint8_t player_uuid[UUID_BYTES];
+    uint8_t player_secret[NET_SECRET_LEN];
     char last_host[CONFIG_HOST_LEN];
     int last_port;
     char last_name[NET_MAX_NAME_LEN + 1];
@@ -30,5 +36,9 @@ void config_load(Config *cfg);
  * directory/file can't be created (e.g. read-only filesystem) - losing a
  * saved preference isn't worth crashing the game over. */
 void config_save(const Config *cfg);
+
+/* Replaces the stored identity with a freshly generated one. Abandons the old
+ * one irrecoverably, so callers should confirm first. */
+void config_new_identity(Config *cfg);
 
 #endif

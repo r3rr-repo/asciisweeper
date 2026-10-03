@@ -102,12 +102,30 @@ class Client {
 
   mem() { return new Uint8Array(this.core.memory.buffer); }
 
-  packHello(name, skin, hair) {
-    const p = this.core.core_in_ptr();
-    const b = new TextEncoder().encode(name + "\0");
-    this.mem().set(b, p);
-    const n = this.core.core_pack_hello(p, skin, hair);
-    return this.mem().slice(this.core.core_tx_ptr(), this.core.core_tx_ptr() + n);
+  /** A fresh identity per client, unless one is supplied to reuse. */
+  makeIdentity(reuse) {
+    const c = this.core;
+    if (reuse) return reuse;
+    const rnd = new Uint8Array(10);
+    for (let i = 0; i < 10; i++) rnd[i] = Math.floor(Math.random() * 256);
+    const rp = c.core_in_ptr(), up = rp + 32;
+    this.mem().set(rnd, rp);
+    c.core_uuid_v7(Date.now(), rp, up);
+    const uuid = this.mem().slice(up, up + 16);
+    const secret = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) secret[i] = Math.floor(Math.random() * 256);
+    return { uuid, secret };
+  }
+
+  packHello(name, skin, hair, ident) {
+    const c = this.core;
+    const p = c.core_in_ptr();
+    this.mem().set(new TextEncoder().encode(name + "\0"), p);
+    const up = p + 160, sp = up + 16;
+    this.mem().set(ident.uuid, up);
+    this.mem().set(ident.secret, sp);
+    const n = c.core_pack_hello(p, skin, hair, up, sp);
+    return this.mem().slice(c.core_tx_ptr(), c.core_tx_ptr() + n);
   }
 
   /** Decodes through the C codec, exactly as the browser does. */
@@ -139,8 +157,10 @@ try {
   ok(true, "both clients opened a WebSocket through the bridge");
 
   // ---- handshake -----------------------------------------------------------
-  a.send(MSG.HELLO, a.packHello("Alice", 3, 5));
-  b.send(MSG.HELLO, b.packHello("Bob", 2, 6));
+  const identA = a.makeIdentity();
+  const identB = b.makeIdentity();
+  a.send(MSG.HELLO, a.packHello("Alice", 3, 5, identA));
+  b.send(MSG.HELLO, b.packHello("Bob", 2, 6, identB));
 
   const wa = await a.expect(MSG.WELCOME);
   ok(a.rxFrame(wa), "WELCOME from the C server decodes with the wasm codec");
@@ -428,6 +448,30 @@ try {
   const againB = await b.expect(MSG.MATCH_START, 6000);
   ok(a.rxFrame(againA) && b.rxFrame(againB),
     `rematch still accepted after ${(WAIT_MS / 1000).toFixed(0)}s - the 20s window is gone`);
+
+  // ---- identity: the same UUID with a different secret is refused ---------
+  // This is the property the whole UUID+secret design exists for. Without it
+  // anyone could post scores as anyone else once rankings arrive.
+  {
+    const impostor = new Client("Impostor", await newCore());
+    await impostor.opened;
+    const stolen = { uuid: identA.uuid, secret: new Uint8Array(32) };  // wrong secret
+    impostor.send(MSG.HELLO, impostor.packHello("NotAlice", 1, 1, stolen));
+    const err = await impostor.expect(MSG.ERROR, 5000);
+    ok(impostor.rxFrame(err), "a stolen UUID is answered with an error");
+    eq(impostor.core.core_err_code(), 9, "...specifically ERR_IDENTITY_MISMATCH");
+    impostor.close();
+  }
+
+  // The rightful owner, with the right secret, is still welcome.
+  {
+    const again = new Client("Alice", await newCore());
+    await again.opened;
+    again.send(MSG.HELLO, again.packHello("Alice renamed", 3, 5, identA));
+    const w = await again.expect(MSG.WELCOME, 5000);
+    ok(again.rxFrame(w), "the same identity reconnects fine, under a different name");
+    again.close();
+  }
 
   a.close();
   b.close();

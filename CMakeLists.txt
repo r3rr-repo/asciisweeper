@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(asciisweeper VERSION 0.9 LANGUAGES C)
+project(asciisweeper VERSION 0.10 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -44,11 +44,11 @@ configure_file(src/version.h.in generated/version.h @ONLY)
 
 set(COMMON_SRC src/board.c src/net_io.c)
 
-add_executable(asciisweeper src/main.c src/client_net.c src/avatar.c src/config.c ${COMMON_SRC})
+add_executable(asciisweeper src/main.c src/client_net.c src/avatar.c src/config.c src/uuid.c ${COMMON_SRC})
 target_include_directories(asciisweeper PRIVATE ${CURSES_INCLUDE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_link_libraries(asciisweeper PRIVATE ${CURSES_LIBRARIES} OpenSSL::SSL OpenSSL::Crypto)
 
-add_executable(asciisweeper-server src/server.c src/score.c ${COMMON_SRC})
+add_executable(asciisweeper-server src/server.c src/score.c src/uuid.c ${COMMON_SRC})
 target_include_directories(asciisweeper-server PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_link_libraries(asciisweeper-server PRIVATE OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
 
@@ -60,3 +60,10 @@ target_link_libraries(asciisweeper-server PRIVATE OpenSSL::SSL OpenSSL::Crypto T
 #   cmake --build build --target score-test && ./build/score-test
 add_executable(score-test EXCLUDE_FROM_ALL test/score_test.c src/score.c src/board.c)
 target_include_directories(score-test PRIVATE src)
+
+add_executable(uuid-test EXCLUDE_FROM_ALL test/uuid_test.c src/uuid.c)
+target_include_directories(uuid-test PRIVATE src)
+
+add_executable(config-test EXCLUDE_FROM_ALL test/config_test.c src/config.c src/avatar.c src/uuid.c)
+target_include_directories(config-test PRIVATE src)
+target_link_libraries(config-test PRIVATE ${CURSES_LIBRARIES} OpenSSL::Crypto)

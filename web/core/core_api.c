@@ -23,6 +23,7 @@
 #include "board.h"
 #include "net_proto.h"
 #include "net_io.h"
+#include "uuid.h"
 
 #define WASM_EXPORT(n) __attribute__((export_name(n), used))
 
@@ -154,10 +155,46 @@ void core_avatar_random(uint8_t *out_skin_hair)
     out_skin_hair[1] = (uint8_t)(1 + rand() % 7);
 }
 
+/* ---- player identity ----
+ *
+ * The browser reaches the SAME uuid.c the terminal client uses, rather than
+ * reimplementing RFC 9562 in TypeScript. Clock and entropy come from JS
+ * (Date.now and crypto.getRandomValues) because this module has no imports and
+ * therefore no access to either.
+ *
+ * `unix_ms` is a double: JS numbers hold milliseconds exactly well past any
+ * plausible date, and it avoids i64/BigInt at the boundary.
+ */
+WASM_EXPORT("core_uuid_v7")
+void core_uuid_v7(double unix_ms, const uint8_t *rnd10, uint8_t *out16)
+{
+    uuid_v7(out16, (uint64_t)unix_ms, rnd10);
+}
+
+WASM_EXPORT("core_uuid_is_v7")
+int core_uuid_is_v7(const uint8_t *u) { return uuid_is_v7(u) ? 1 : 0; }
+
+/* Writes the canonical 36-character form plus a terminator. */
+WASM_EXPORT("core_uuid_format")
+void core_uuid_format(const uint8_t *u, char *out) { uuid_format(u, out); }
+
+WASM_EXPORT("core_uuid_parse")
+int core_uuid_parse(const char *s, uint8_t *out) { return uuid_parse(s, out) ? 1 : 0; }
+
+WASM_EXPORT("core_hex_encode")
+void core_hex_encode(const uint8_t *in, int len, char *out) { hex_encode(in, (size_t)len, out); }
+
+WASM_EXPORT("core_hex_decode")
+int core_hex_decode(const char *s, uint8_t *out, int len) { return hex_decode(s, out, (size_t)len) ? 1 : 0; }
+
+WASM_EXPORT("core_uuid_len")   int core_uuid_len(void)   { return NET_UUID_LEN; }
+WASM_EXPORT("core_secret_len") int core_secret_len(void) { return NET_SECRET_LEN; }
+
 /* ---- outgoing messages: pack into g_tx, return payload length ---- */
 
 WASM_EXPORT("core_pack_hello")
-int core_pack_hello(const char *name, int skin, int hair)
+int core_pack_hello(const char *name, int skin, int hair,
+                    const uint8_t *uuid, const uint8_t *secret)
 {
     MsgHello m;
     memset(&m, 0, sizeof(m));
@@ -166,6 +203,8 @@ int core_pack_hello(const char *name, int skin, int hair)
     m.name[NET_MAX_NAME_LEN] = '\0';
     m.avatar_skin = (uint8_t)skin;
     m.avatar_hair = (uint8_t)hair;
+    memcpy(m.player_uuid, uuid, NET_UUID_LEN);
+    memcpy(m.player_secret, secret, NET_SECRET_LEN);
     return (int)pack_hello(g_tx, &m);
 }
 

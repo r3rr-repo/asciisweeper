@@ -27,10 +27,12 @@
 #include "net_proto.h"
 #include "net_io.h"
 #include "score.h"
+#include "uuid.h"
 #include "version.h"
 
 #define MAX_QUEUE            64
 #define MAX_TOKENS           128
+#define MAX_IDENTITIES       512  /* UUID -> secret bindings held in memory */
 #define RATE_LIMIT_SLOTS     256
 #define MAX_CONNECTIONS      500
 
@@ -89,6 +91,9 @@ typedef struct Connection {
     int fd;
     struct in_addr ip;
     char name[NET_MAX_NAME_LEN + 1];
+    /* Canonical UUIDv7 text, filled at HELLO. Display and logging only - the
+     * secret that proves it is never kept on the Connection. */
+    char player_id_str[UUID_STR_LEN + 1];
     uint8_t avatar_skin, avatar_hair;
 
     pthread_mutex_t state_lock;
@@ -147,6 +152,76 @@ typedef struct {
     Match *match;
     int player_index;
 } TokenEntry;
+
+/* ---------------- player identity ----------------
+ *
+ * A player is a UUIDv7 plus a secret that proves the UUID is theirs. The
+ * binding is made the first time a UUID is seen (trust on first use) and
+ * enforced from then on, so a nickname can change freely without losing a
+ * score history and nobody can claim someone else's identity.
+ *
+ * This table is IN MEMORY ONLY: the server writes no files, so the bindings
+ * are lost on restart and the first claimant wins again. That is tolerable
+ * while nothing is ranked yet, and it is the structure that becomes a
+ * persistent table when rankings arrive - no protocol change needed then.
+ */
+typedef struct {
+    bool used;
+    uint8_t uuid[NET_UUID_LEN];
+    uint8_t secret[NET_SECRET_LEN];
+    time_t last_seen;
+} IdentityEntry;
+
+static IdentityEntry g_identities[MAX_IDENTITIES];
+static pthread_mutex_t g_identities_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* Constant-time compare, so a wrong secret cannot be discovered a byte at a
+ * time by timing the rejection. */
+static bool secret_equal(const uint8_t *a, const uint8_t *b)
+{
+    uint8_t diff = 0;
+    for (size_t i = 0; i < NET_SECRET_LEN; i++)
+        diff |= (uint8_t)(a[i] ^ b[i]);
+    return diff == 0;
+}
+
+/* Returns false only when the UUID is already bound to a DIFFERENT secret. */
+static bool identity_check_and_bind(const uint8_t *uuid, const uint8_t *secret)
+{
+    bool ok = true;
+    time_t now = time(NULL);
+
+    pthread_mutex_lock(&g_identities_lock);
+
+    int free_slot = -1, oldest = 0;
+    for (int i = 0; i < MAX_IDENTITIES; i++) {
+        if (!g_identities[i].used) {
+            if (free_slot < 0) free_slot = i;
+            continue;
+        }
+        if (memcmp(g_identities[i].uuid, uuid, NET_UUID_LEN) == 0) {
+            ok = secret_equal(g_identities[i].secret, secret);
+            if (ok) g_identities[i].last_seen = now;
+            pthread_mutex_unlock(&g_identities_lock);
+            return ok;
+        }
+        if (g_identities[i].last_seen < g_identities[oldest].last_seen)
+            oldest = i;
+    }
+
+    /* Unseen UUID: bind it. When the table is full the least recently seen
+     * entry is recycled, which means a long-idle player can be impersonated
+     * after enough churn - another reason this wants persisting before it
+     * guards anything that matters. */
+    int slot = free_slot >= 0 ? free_slot : oldest;
+    g_identities[slot].used = true;
+    memcpy(g_identities[slot].uuid, uuid, NET_UUID_LEN);
+    memcpy(g_identities[slot].secret, secret, NET_SECRET_LEN);
+    g_identities[slot].last_seen = now;
+
+    pthread_mutex_unlock(&g_identities_lock);
+    return true;
+}
 
 static TokenEntry g_tokens[MAX_TOKENS];
 static pthread_mutex_t g_tokens_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -929,6 +1004,18 @@ static void handle_connection(Connection *conn)
         send_error(conn, ERR_BAD_VERSION, "unsupported protocol version");
         return;
     }
+
+    if (!uuid_is_v7(hello.player_uuid)) {
+        log_line("%s: rejected HELLO with a malformed player id", conn_ip);
+        send_error(conn, ERR_MALFORMED, "player id must be a UUIDv7");
+        return;
+    }
+    if (!identity_check_and_bind(hello.player_uuid, hello.player_secret)) {
+        log_line("%s: rejected HELLO, player id is bound to a different secret", conn_ip);
+        send_error(conn, ERR_IDENTITY_MISMATCH, "this player id belongs to someone else");
+        return;
+    }
+    uuid_format(hello.player_uuid, conn->player_id_str);
     sanitize_name(hello.name);
     strncpy(conn->name, hello.name, NET_MAX_NAME_LEN);
     conn->avatar_skin = hello.avatar_skin;
@@ -940,7 +1027,12 @@ static void handle_connection(Connection *conn)
         return;
     }
 
-    log_line("%s (%s) connected", conn->name, conn_ip);
+    /* The FULL id, not a prefix: a UUIDv7 begins with a 48-bit millisecond
+     * timestamp, so two players connecting in the same millisecond share their
+     * first eight characters. A truncated id would identify the moment rather
+     * than the player, which is the opposite of what these logs are for -
+     * they are the only record a future ranking can be rebuilt from. */
+    log_line("%s [%s] (%s) connected", conn->name, conn->player_id_str, conn_ip);
 
     MsgWelcome welcome = { .protocol_version = NET_PROTO_VERSION, .player_id = 0 };
     uint8_t wbuf[8];

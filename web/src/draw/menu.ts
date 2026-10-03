@@ -8,7 +8,7 @@
  * bridge, that takes the multiplayer prompts from four down to one - your name.
  */
 import type { Surface } from "../term/surface";
-import { CP_HUD, CP_TITLE } from "./colors";
+import { CP_HUD, CP_LOSE, CP_TITLE } from "./colors";
 import { drawAvatar, type Avatar } from "./avatar";
 import { AVATAR_HEIGHT_CHARS, AVATAR_WIDTH_CHARS } from "../game/layout";
 
@@ -18,12 +18,14 @@ export const MENU_ITEMS = [
   "Expert        30x16, 99 mines",
   "Multiplayer...",
   "Avatar...",
+  "Identity...",
   "Custom...",
   "Quit",
 ] as const;
 
 export const MENU_BEGINNER = 0, MENU_INTERMEDIATE = 1, MENU_EXPERT = 2,
-             MENU_MULTIPLAYER = 3, MENU_AVATAR = 4, MENU_CUSTOM = 5, MENU_QUIT = 6;
+             MENU_MULTIPLAYER = 3, MENU_AVATAR = 4, MENU_IDENTITY = 5,
+             MENU_CUSTOM = 6, MENU_QUIT = 7;
 
 /** src/main.c:323-327 */
 export const PRESETS = [
@@ -127,5 +129,40 @@ export function drawPrompt(
   const help = "Enter: next   Esc: back";
   s.withAttrs(CP_HUD, false, () => {
     s.print(top + 2 + lines.length + 1, s.centreCol(0, s.cols, help), help);
+  });
+}
+
+/**
+ * The player identity screen.
+ *
+ * The UUID is public and always shown. The export string additionally carries
+ * the secret, which is what actually proves the identity, so it is revealed
+ * only on request and with a warning - anyone who reads it becomes you.
+ */
+export function drawIdentityScreen(
+  s: Surface, playerId: string, exportString: string | null, message: string,
+): void {
+  s.erase();
+  const title = "YOUR PLAYER ID";
+  const top = Math.max(2, Math.floor((s.rows - 14) / 2));
+  const left = Math.max(1, Math.floor((s.cols - 72) / 2));
+
+  s.withAttrs(CP_TITLE, true, () => s.print(top, s.centreCol(0, s.cols, title), title));
+  s.withAttrs(CP_HUD, false, () => {
+    s.print(top + 2, left, playerId);
+    s.print(top + 4, left, "Scores follow this id, not your name, so you can rename freely.");
+  });
+
+  if (exportString) {
+    s.withAttrs(CP_LOSE, true, () =>
+      s.print(top + 6, left, "Keep this private - it is as good as a password:"));
+    s.withAttrs(CP_HUD, false, () => s.print(top + 7, left, exportString));
+  }
+  if (message) {
+    s.withAttrs(CP_LOSE, true, () => s.print(top + 9, left, message));
+  }
+
+  s.withAttrs(CP_HUD, false, () => {
+    s.print(top + 11, left, "[E]xport   [I]mport   [R]egenerate   [Esc] back");
   });
 }

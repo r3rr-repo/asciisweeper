@@ -97,6 +97,7 @@ export class Multiplayer {
     private url: string,
     private myName: string,
     private myAvatar: Avatar,
+    private identity: { uuid: Uint8Array; secret: Uint8Array },
   ) {
     this.boardW = core.consts.mpW;
     this.boardH = core.consts.mpH;
@@ -144,7 +145,9 @@ export class Multiplayer {
 
     if (this.conn.state === "open" && this.phase === "connecting") {
       // src/main.c - HELLO carries the protocol version, name and avatar.
-      this.conn.send(MSG.HELLO, this.core.packHello(this.myName, this.myAvatar.skin, this.myAvatar.hair));
+      this.conn.send(MSG.HELLO, this.core.packHello(
+        this.myName, this.myAvatar.skin, this.myAvatar.hair,
+        this.identity.uuid, this.identity.secret));
       this.phase = "queued";
       this.statusLine = "Waiting for an opponent...";
       this.lastPingMs = nowMs;

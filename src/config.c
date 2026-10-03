@@ -4,6 +4,10 @@
 #include <string.h>
 #include <stdbool.h>
 #include <sys/stat.h>
+#include <time.h>
+#include <openssl/rand.h>
+
+#include "uuid.h"
 
 #define CONFIG_DIR_FMT  "%s/.config/asciisweeper"
 #define CONFIG_FILE_FMT "%s/.config/asciisweeper/config"
@@ -17,9 +21,30 @@ static bool config_path(char *buf, size_t len, const char *fmt)
     return true;
 }
 
+/* A fresh identity: a UUIDv7 stamped with the current time plus a secret that
+ * proves it. OpenSSL's RAND_bytes is already a dependency of this binary and is
+ * the right source for both - a predictable secret would be no secret. */
+void config_new_identity(Config *cfg)
+{
+    uint8_t rnd[10];
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    uint64_t ms = (uint64_t)ts.tv_sec * 1000u + (uint64_t)(ts.tv_nsec / 1000000);
+
+    if (RAND_bytes(rnd, sizeof(rnd)) != 1 ||
+        RAND_bytes(cfg->player_secret, NET_SECRET_LEN) != 1) {
+        /* Without real entropy an identity would be guessable, and a guessable
+         * identity is worse than none once scores are attached to it. */
+        fprintf(stderr, "asciisweeper: no secure randomness available for a player id\n");
+        exit(1);
+    }
+    uuid_v7(cfg->player_uuid, ms, rnd);
+}
+
 static void set_defaults(Config *cfg)
 {
     avatar_random(&cfg->avatar);
+    config_new_identity(cfg);
     strncpy(cfg->last_host, "localhost", CONFIG_HOST_LEN - 1);
     cfg->last_host[CONFIG_HOST_LEN - 1] = '\0';
     cfg->last_port = 4443;
@@ -43,6 +68,7 @@ void config_load(Config *cfg)
     }
 
     bool have_skin = false, have_hair = false;
+    bool have_id = false, have_secret = false;
     char line[256];
     while (fgets(line, sizeof(line), f)) {
         char key[64], value[192];
@@ -54,12 +80,23 @@ void config_load(Config *cfg)
         else if (strcmp(key, "last_port") == 0) { cfg->last_port = atoi(value); }
         else if (strcmp(key, "last_name") == 0) { strncpy(cfg->last_name, value, NET_MAX_NAME_LEN); cfg->last_name[NET_MAX_NAME_LEN] = '\0'; }
         else if (strcmp(key, "last_ca_file") == 0) { strncpy(cfg->last_ca_file, value, CONFIG_CA_FILE_LEN - 1); cfg->last_ca_file[CONFIG_CA_FILE_LEN - 1] = '\0'; }
+        else if (strcmp(key, "player_id") == 0) { have_id = uuid_parse(value, cfg->player_uuid) && uuid_is_v7(cfg->player_uuid); }
+        else if (strcmp(key, "player_secret") == 0) { have_secret = hex_decode(value, cfg->player_secret, NET_SECRET_LEN); }
     }
     fclose(f);
 
     /* A partially-written or hand-edited file might be missing the avatar
      * entirely; fall back to keeping the freshly-generated default for
      * whichever half is absent rather than leaving it zeroed. */
+    /* A config predating identities, or one that was hand-edited into an
+     * inconsistent state, gets a fresh pair. Both halves must be present and
+     * valid: a UUID without its secret cannot authenticate, and a secret
+     * without its UUID names nobody. */
+    if (!have_id || !have_secret) {
+        config_new_identity(cfg);
+        config_save(cfg);
+    }
+
     if (!have_skin || !have_hair) {
         Avatar fallback;
         avatar_random(&fallback);
@@ -96,5 +133,12 @@ void config_save(const Config *cfg)
     fprintf(f, "last_port=%d\n", cfg->last_port);
     fprintf(f, "last_name=%s\n", cfg->last_name);
     fprintf(f, "last_ca_file=%s\n", cfg->last_ca_file);
+    {
+        char id[UUID_STR_LEN + 1], secret[NET_SECRET_LEN * 2 + 1];
+        uuid_format(cfg->player_uuid, id);
+        hex_encode(cfg->player_secret, NET_SECRET_LEN, secret);
+        fprintf(f, "player_id=%s\n", id);
+        fprintf(f, "player_secret=%s\n", secret);
+    }
     fclose(f);
 }

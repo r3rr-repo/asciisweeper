@@ -18,9 +18,9 @@ import { LineEdit } from "./term/lineedit";
 import { drawTestCard } from "./term/testcard";
 import { setupColors, CP_HUD, CP_LOSE, CP_TITLE } from "./draw/colors";
 import {
-  MENU_AVATAR, MENU_BEGINNER, MENU_CUSTOM, MENU_EXPERT, MENU_INTERMEDIATE,
-  MENU_ITEMS, MENU_MULTIPLAYER, MENU_QUIT, PRESETS,
-  drawAvatarScreen, drawMenu, drawPrompt, menuHitTest,
+  MENU_AVATAR, MENU_BEGINNER, MENU_CUSTOM, MENU_EXPERT, MENU_IDENTITY,
+  MENU_INTERMEDIATE, MENU_ITEMS, MENU_MULTIPLAYER, MENU_QUIT, PRESETS,
+  drawAvatarScreen, drawIdentityScreen, drawMenu, drawPrompt, menuHitTest,
 } from "./draw/menu";
 import { clampDifficulty } from "./game/layout";
 import { SinglePlayer } from "./game/single";
@@ -38,6 +38,7 @@ const VERSION = `asciisweeper-web ${__APP_VERSION__}`;
 type Mode =
   | { kind: "menu"; sel: number }
   | { kind: "avatar" }
+  | { kind: "identity"; revealed: boolean; message: string; importing: LineEdit | null }
   | { kind: "custom"; fields: LineEdit[]; active: number }
   | { kind: "mpSetup"; fields: LineEdit[]; active: number; error: string }
   | { kind: "single"; game: SinglePlayer }
@@ -172,6 +173,18 @@ class App {
     switch (this.mode.kind) {
       case "menu": drawMenu(s, this.mode.sel, VERSION); break;
       case "avatar": drawAvatarScreen(s, this.config.avatar); break;
+      case "identity": {
+        const m = this.mode;
+        if (m.importing) {
+          drawPrompt(s, "IMPORT IDENTITY",
+            [{ label: "Paste id:secret", value: m.importing.display }], 0);
+        } else {
+          drawIdentityScreen(s, this.config.playerId,
+            m.revealed ? `${this.config.playerId}:${this.config.playerSecret}` : null,
+            m.message);
+        }
+        break;
+      }
       case "custom": {
         const f = this.mode.fields;
         drawPrompt(s, "CUSTOM BOARD", [
@@ -298,6 +311,9 @@ class App {
       case MENU_AVATAR:
         this.mode = { kind: "avatar" };
         return;
+      case MENU_IDENTITY:
+        this.mode = { kind: "identity", revealed: false, message: "", importing: null };
+        return;
       case MENU_MULTIPLAYER:
         this.mode = {
           kind: "mpSetup",
@@ -321,6 +337,28 @@ class App {
 
   /** A tab cannot exit itself, so 'q' lands on a farewell screen rather than
    *  appearing to do nothing. Any key returns to the menu. */
+  /**
+   * The stored identity as raw bytes for the wire. Parsed on demand rather than
+   * cached, so an import from the identity screen takes effect immediately.
+   */
+  private identityBytes(): { uuid: Uint8Array; secret: Uint8Array } {
+    const uuid = this.core.parseUuid(this.config.playerId);
+    const secret = this.core.hexDecode(this.config.playerSecret, this.core.consts.secretLen);
+    if (!uuid || !secret) {
+      // loadConfig validates both, so this means they were corrupted since.
+      // Mint a replacement rather than send something the server will refuse.
+      const fresh = { id: this.core.formatUuid(this.core.newUuid()), secret: this.core.hexEncode(this.core.newSecret()) };
+      this.config.playerId = fresh.id;
+      this.config.playerSecret = fresh.secret;
+      saveConfig(this.config);
+      return {
+        uuid: this.core.parseUuid(fresh.id)!,
+        secret: this.core.hexDecode(fresh.secret, this.core.consts.secretLen)!,
+      };
+    }
+    return { uuid, secret };
+  }
+
   private quit(): void {
     this.mode = { kind: "quit" };
   }
@@ -357,6 +395,7 @@ class App {
   private textEntryOpen(): boolean {
     switch (this.mode.kind) {
       case "custom": case "mpSetup": return true;
+      case "identity": return this.mode.importing !== null;
       case "multi": return this.mode.game.textEntryActive;
       default: return false;
     }
@@ -388,6 +427,59 @@ class App {
           this.mode = { kind: "menu", sel: MENU_AVATAR };
         }
         return;
+
+      case "identity": {
+        const m = this.mode;
+        if (m.importing) {
+          const r = m.importing.handle(k);
+          if (r === "cancel") { m.importing = null; return; }
+          if (r !== "commit") return;
+          const raw = m.importing.text.trim();
+          m.importing = null;
+          const sep = raw.indexOf(":");
+          const uuid = sep > 0 ? this.core.parseUuid(raw.slice(0, sep)) : null;
+          const secret = sep > 0
+            ? this.core.hexDecode(raw.slice(sep + 1), this.core.consts.secretLen) : null;
+          if (!uuid || !secret || !this.core.isUuidV7(uuid)) {
+            m.message = "Not a valid id:secret pair - nothing changed.";
+            return;
+          }
+          this.config.playerId = raw.slice(0, sep);
+          this.config.playerSecret = raw.slice(sep + 1);
+          saveConfig(this.config);
+          m.revealed = false;
+          m.message = "Imported.";
+          return;
+        }
+        if (k.name === "escape" || k.name === "enter") {
+          this.input.setTextEntry(false);
+          this.mode = { kind: "menu", sel: MENU_IDENTITY };
+          return;
+        }
+        if (k.name !== "char") return;
+        switch (k.ch.toLowerCase()) {
+          case "e": m.revealed = !m.revealed; m.message = ""; return;
+          case "i":
+            // 36 for the uuid, a colon, 64 hex characters.
+            m.importing = new LineEdit(101, "");
+            m.message = "";
+            this.input.setTextEntry(true);
+            return;
+          case "r":
+            // Irrecoverable, so it takes two keystrokes rather than one.
+            if (m.message.startsWith("Press R again")) {
+              this.config.playerId = this.core.formatUuid(this.core.newUuid());
+              this.config.playerSecret = this.core.hexEncode(this.core.newSecret());
+              saveConfig(this.config);
+              m.revealed = false;
+              m.message = "New identity generated. The old one is gone.";
+            } else {
+              m.message = "Press R again to abandon this id. Any score history is lost.";
+            }
+            return;
+          default: return;
+        }
+      }
 
       case "custom": {
         const m = this.mode;
@@ -439,7 +531,9 @@ class App {
         this.input.setTextEntry(false);
         this.mode = {
           kind: "multi",
-          game: new Multiplayer(this.core, resolveWsUrl(this.config), this.config.name, this.config.avatar),
+          game: new Multiplayer(
+            this.core, resolveWsUrl(this.config), this.config.name, this.config.avatar,
+            this.identityBytes()),
         };
         return;
       }
@@ -487,7 +581,13 @@ async function boot(): Promise<void> {
   try {
     const core = await Core.load();
     core.initConsts();
-    const config = loadConfig(() => core.avatarRandom());
+    const config = loadConfig({
+      randomAvatar: () => core.avatarRandom(),
+      newIdentity: () => ({
+        id: core.formatUuid(core.newUuid()),
+        secret: core.hexEncode(core.newSecret()),
+      }),
+    });
     bootMsg?.remove();
     const app = new App(core, config, canvas, ime);
     app.start();

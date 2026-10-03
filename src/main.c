@@ -29,7 +29,7 @@ typedef struct {
     bool side_panels_fit; /* multiplayer: is there room for avatar panels? */
 } Game;
 
-typedef enum { MENU_BEGINNER, MENU_INTERMEDIATE, MENU_EXPERT, MENU_MULTIPLAYER, MENU_AVATAR, MENU_CUSTOM, MENU_QUIT } MenuChoice;
+typedef enum { MENU_BEGINNER, MENU_INTERMEDIATE, MENU_EXPERT, MENU_MULTIPLAYER, MENU_AVATAR, MENU_IDENTITY, MENU_CUSTOM, MENU_QUIT } MenuChoice;
 
 typedef enum { AFTER_RESTART, AFTER_MENU, AFTER_QUIT } AfterGame;
 
@@ -844,6 +844,8 @@ static AfterGame play_multiplayer(const char *host, int port, const char *name, 
     MsgHello hello = { .protocol_version = NET_PROTO_VERSION,
                         .avatar_skin = cfg->avatar.skin_color,
                         .avatar_hair = cfg->avatar.hair_color };
+    memcpy(hello.player_uuid, cfg->player_uuid, UUID_BYTES);
+    memcpy(hello.player_secret, cfg->player_secret, NET_SECRET_LEN);
     strncpy(hello.name, name, NET_MAX_NAME_LEN);
     uint8_t buf[NET_MAX_PAYLOAD];
     size_t n = pack_hello(buf, &hello);
@@ -1091,6 +1093,96 @@ static void avatar_screen(Config *cfg)
     }
 }
 
+/* Shows the player id, and allows carrying it between machines.
+ *
+ * The UUID alone is shown by default. The export string additionally carries
+ * the secret, which is what actually proves the identity, so it is revealed
+ * only on request and with a warning - anyone who reads it becomes you. */
+static void identity_screen(Config *cfg)
+{
+    bool revealed = false;
+    wtimeout(stdscr, -1);
+
+    while (1) {
+        erase();
+        int scr_h, scr_w;
+        getmaxyx(stdscr, scr_h, scr_w);
+        (void)scr_h;
+
+        char id[UUID_STR_LEN + 1];
+        uuid_format(cfg->player_uuid, id);
+
+        const char *title = "YOUR PLAYER ID";
+        int top = 4;
+        int left = (scr_w - 72) / 2;
+        if (left < 1) left = 1;
+
+        attron(COLOR_PAIR(CP_TITLE) | A_BOLD);
+        mvprintw(top, (scr_w - (int)strlen(title)) / 2, "%s", title);
+        attroff(COLOR_PAIR(CP_TITLE) | A_BOLD);
+
+        attron(COLOR_PAIR(CP_HUD));
+        mvprintw(top + 2, left, "%s", id);
+        mvprintw(top + 4, left, "Scores follow this id, not your name, so you can rename freely.");
+        attroff(COLOR_PAIR(CP_HUD));
+
+        if (revealed) {
+            char secret[NET_SECRET_LEN * 2 + 1];
+            hex_encode(cfg->player_secret, NET_SECRET_LEN, secret);
+            attron(COLOR_PAIR(CP_LOSE) | A_BOLD);
+            mvprintw(top + 6, left, "Keep this private - it is as good as a password:");
+            attroff(COLOR_PAIR(CP_LOSE) | A_BOLD);
+            attron(COLOR_PAIR(CP_HUD));
+            mvprintw(top + 7, left, "%s:%s", id, secret);
+            attroff(COLOR_PAIR(CP_HUD));
+        }
+
+        attron(COLOR_PAIR(CP_HUD));
+        mvprintw(top + 10, left, "[E]xport   [I]mport   [R]egenerate   [Enter] back");
+        attroff(COLOR_PAIR(CP_HUD));
+        refresh();
+
+        int ch = getch();
+        if (ch == '\n' || ch == KEY_ENTER || ch == 27 || ch == 'q' || ch == 'Q')
+            return;
+        if (ch == 'e' || ch == 'E') {
+            revealed = !revealed;
+        } else if (ch == 'i' || ch == 'I') {
+            char buf[UUID_STR_LEN + 1 + NET_SECRET_LEN * 2 + 2];
+            prompt_str("Paste id:secret", top + 12, left, "", buf, sizeof(buf));
+            char *colon = strchr(buf, ':');
+            uint8_t new_uuid[UUID_BYTES], new_secret[NET_SECRET_LEN];
+            if (colon) {
+                *colon = '\0';
+                if (uuid_parse(buf, new_uuid) && uuid_is_v7(new_uuid) &&
+                    hex_decode(colon + 1, new_secret, NET_SECRET_LEN)) {
+                    memcpy(cfg->player_uuid, new_uuid, UUID_BYTES);
+                    memcpy(cfg->player_secret, new_secret, NET_SECRET_LEN);
+                    config_save(cfg);
+                    revealed = false;
+                    continue;
+                }
+            }
+            attron(COLOR_PAIR(CP_LOSE) | A_BOLD);
+            mvprintw(top + 13, left, "Not a valid id:secret pair - nothing changed.");
+            attroff(COLOR_PAIR(CP_LOSE) | A_BOLD);
+            refresh();
+            getch();
+        } else if (ch == 'r' || ch == 'R') {
+            attron(COLOR_PAIR(CP_LOSE) | A_BOLD);
+            mvprintw(top + 12, left, "Abandon this id and start fresh? Any score history is lost. [y/N]");
+            attroff(COLOR_PAIR(CP_LOSE) | A_BOLD);
+            refresh();
+            int c = getch();
+            if (c == 'y' || c == 'Y') {
+                config_new_identity(cfg);
+                config_save(cfg);
+                revealed = false;
+            }
+        }
+    }
+}
+
 static MenuChoice menu(Difficulty *custom_out, MPConnectInfo *mp_out, Config *cfg)
 {
     const char *title = "ASCIISWEEPER";
@@ -1101,11 +1193,12 @@ static MenuChoice menu(Difficulty *custom_out, MPConnectInfo *mp_out, Config *cf
         "Expert       (30x16, 99 mines)",
         "Multiplayer  (16x16, 40 mines, online)",
         "Avatar...",
+        "Identity...",
         "Custom...",
         "Quit"
     };
     const char *hint = "Move: up/down or j/k   Select: enter/space   Quit: q";
-    int n = 7;
+    int n = 8;
     int sel = 0;
     wtimeout(stdscr, -1); /* blocking while in menu */
     clear(); /* force a full physical redraw when coming from a differently-shaped screen */
@@ -1157,6 +1250,11 @@ static MenuChoice menu(Difficulty *custom_out, MPConnectInfo *mp_out, Config *cf
                 if (choice == MENU_QUIT) return MENU_QUIT;
                 if (choice == MENU_AVATAR) {
                     avatar_screen(cfg);
+                    clear();
+                    break;
+                }
+                if (choice == MENU_IDENTITY) {
+                    identity_screen(cfg);
                     clear();
                     break;
                 }

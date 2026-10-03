@@ -24,6 +24,13 @@ import { DEFAULT_TARGET_ROWS, clampTargetRows } from "./term/sizing";
 
 export interface Config {
   v: 1;
+  /**
+   * Stable identity. `playerId` is the public UUIDv7 and `playerSecret` the
+   * hex-encoded 32 bytes that prove it is yours - treat the latter like a
+   * password. Scores follow this, not the nickname, so renaming is free.
+   */
+  playerId: string;
+  playerSecret: string;
   avatar: { skin: number; hair: number };
   wsUrl: string | null;
   name: string;
@@ -42,10 +49,18 @@ export interface Config {
 
 export const DEFAULT_FONT = 'Menlo, "SF Mono", "DejaVu Sans Mono", ui-monospace, monospace';
 
-function defaults(randomAvatar: () => { skin: number; hair: number }): Config {
+export interface IdentityGen {
+  randomAvatar: () => { skin: number; hair: number };
+  newIdentity: () => { id: string; secret: string };
+}
+
+function defaults(gen: IdentityGen): Config {
+  const ident = gen.newIdentity();
   return {
     v: 1,
-    avatar: randomAvatar(),
+    playerId: ident.id,
+    playerSecret: ident.secret,
+    avatar: gen.randomAvatar(),
     wsUrl: BUILD_WS_URL,
     name: "Player",
     baseCell: { w: 10, h: 20 },
@@ -58,8 +73,8 @@ function defaults(randomAvatar: () => { skin: number; hair: number }): Config {
 const clamp07 = (n: unknown, fallback: number): number =>
   typeof n === "number" && Number.isInteger(n) && n >= 0 && n <= 7 ? n : fallback;
 
-export function loadConfig(randomAvatar: () => { skin: number; hair: number }): Config {
-  const d = defaults(randomAvatar);
+export function loadConfig(gen: IdentityGen): Config {
+  const d = defaults(gen);
   let raw: string | null = null;
   try {
     raw = localStorage.getItem(KEY);
@@ -73,8 +88,20 @@ export function loadConfig(randomAvatar: () => { skin: number; hair: number }): 
   try {
     const p = JSON.parse(raw) as Partial<Config>;
     if (p.v !== 1) return d; // unknown version: reset rather than guess
+    // Both halves must be present and well-formed: an id without its secret
+    // cannot authenticate, and a secret without its id names nobody. A config
+    // written before identities existed therefore gains a fresh pair rather
+    // than being reset wholesale.
+    const idOk = typeof p.playerId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(p.playerId);
+    const secretOk = typeof p.playerSecret === "string" && /^[0-9a-f]{64}$/.test(p.playerSecret);
+    const ident = idOk && secretOk
+      ? { id: p.playerId as string, secret: p.playerSecret as string }
+      : gen.newIdentity();
+
     return {
       v: 1,
+      playerId: ident.id,
+      playerSecret: ident.secret,
       avatar: {
         skin: clamp07(p.avatar?.skin, d.avatar.skin),
         hair: clamp07(p.avatar?.hair, d.avatar.hair),

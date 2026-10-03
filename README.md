@@ -111,6 +111,26 @@ overruled a flag, that cell is frozen for the rest of the match. Taking
 back your own flag is just a correction and scores nothing. Your flags
 and your opponent's are drawn in different colours.
 
+### Player identity
+
+Every client generates a **UUIDv7** on first run and stores it alongside a
+32-byte secret — in `~/.config/asciisweeper/config` for the terminal, in
+localStorage for the browser. Scores follow that id rather than your nickname,
+so you can rename freely and two players can share a name without sharing a
+history.
+
+The secret is what proves the id is yours. The server binds the pair the first
+time it sees a UUID and refuses it afterwards if the secret does not match, so
+nobody can claim someone else's identity. Treat it like a password.
+
+**Identity...** in the menu shows your id, and can export it as
+`<uuid>:<secret>` or import one, which is how you play as the same person from
+the terminal and the browser, or from a second machine. Exporting reveals the
+secret, so it is shown only when asked for.
+
+The binding currently lives in the server's memory and is lost on restart;
+making it persistent is part of the ranking work, and needs no protocol change.
+
 **Run a server:**
 
 ```sh
